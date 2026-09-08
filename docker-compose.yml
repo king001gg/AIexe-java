@@ -1,0 +1,160 @@
+version: '3.8'
+
+services:
+  # AI RAG Agent 应用
+  ai-rag-agent:
+    build: .
+    container_name: ai-rag-agent
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=mysql
+      - DB_PORT=3306
+    depends_on:
+      - mysql
+      - redis
+      - milvus
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - ai-rag-network
+    restart: unless-stopped
+
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: ai-rag-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-password}
+      - MYSQL_DATABASE=ai_rag_db
+      - MYSQL_USER=ai_user
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-ai_password}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./src/main/resources/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks:
+      - ai-rag-network
+    restart: unless-stopped
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: ai-rag-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - ai-rag-network
+    restart: unless-stopped
+
+  # Milvus 向量数据库
+  milvus:
+    image: milvusdb/milvus:v2.3.6
+    container_name: ai-rag-milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+      - MINIO_ACCESS_KEY_ID=minioadmin
+      - MINIO_SECRET_ACCESS_KEY=minioadmin
+    depends_on:
+      - etcd
+      - minio
+    volumes:
+      - milvus-data:/var/lib/milvus
+    networks:
+      - ai-rag-network
+    restart: unless-stopped
+
+  # Milvus 依赖 - etcd
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: ai-rag-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - etcd-data:/etcd
+    networks:
+      - ai-rag-network
+    restart: unless-stopped
+
+  # Milvus 依赖 - MinIO
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: ai-rag-minio
+    environment:
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    command: minio server /minio_data
+    ports:
+      - "9001:9001"
+    volumes:
+      - minio-data:/minio_data
+    networks:
+      - ai-rag-network
+    restart: unless-stopped
+
+  # Prometheus 监控
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: ai-rag-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    depends_on:
+      - ai-rag-agent
+    networks:
+      - ai-rag-network
+    restart: unless-stopped
+
+  # Grafana 可视化
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: ai-rag-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - ai-rag-network
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  milvus-data:
+  etcd-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  ai-rag-network:
+    driver: bridge

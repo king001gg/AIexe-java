@@ -1,0 +1,56 @@
+# 本地开发环境配置（无外部依赖，使用 H2 内存数据库）
+server:
+  port: 8080
+
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  # H2 内存数据库
+  datasource:
+    url: jdbc:h2:mem:ai_rag_db;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  # 不自动执行 MySQL 语法的 schema.sql
+  sql:
+    init:
+      mode: never
+
+  # JPA 自动建表
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: false
+    open-in-view: false
+
+  # Redis（懒连接，无 Redis 时不影响启动）
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 4
+          max-idle: 4
+          min-idle: 0
+          max-wait: -1ms
+
+# Milvus（本地不连接）
+milvus:
+  host: localhost
+  port: 19530
+
+# 日志
+logging:
+  level:
+    com.ai.rag: INFO
+    org.springframework.web: INFO
+    dev.langchain4j: WARN

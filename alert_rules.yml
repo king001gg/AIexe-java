@@ -1,0 +1,56 @@
+groups:
+  - name: ai-rag-agent-alerts
+    rules:
+      - alert: HighResponseTime
+        expr: http_server_requests_seconds_max{application="ai-rag-agent"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent响应时间过长"
+          description: "Agent请求最大响应时间超过5秒，当前值: {{ $value }}s"
+
+      - alert: HighTokenConsumption
+        expr: sum(token_usage_total_tokens) > 1000000
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Token消耗过高"
+          description: "Token消耗超过100万，当前值: {{ $value }}"
+
+      - alert: ToolCallFailureRate
+        expr: (sum(tool_calls_failed) / sum(tool_calls_total)) > 0.1
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "工具调用失败率过高"
+          description: "工具调用失败率超过10%，当前值: {{ $value }}"
+
+      - alert: MilvusConnectionLost
+        expr: up{job="milvus"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Milvus连接丢失"
+          description: "Milvus向量数据库无法连接"
+
+      - alert: RedisConnectionLost
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis连接丢失"
+          description: "Redis缓存无法连接"
+
+      - alert: HighMemoryUsage
+        expr: jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM内存使用过高"
+          description: "JVM堆内存使用率超过90%"

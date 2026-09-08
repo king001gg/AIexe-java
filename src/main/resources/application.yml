@@ -1,0 +1,147 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: ai-rag-agent
+
+  # 数据库配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/ai_rag_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # Redis配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 0
+      timeout: 10000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+
+  # JPA配置
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+# LangChain4j配置
+langchain4j:
+  openai:
+    api-key: ${OPENAI_API_KEY:your-api-key}
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+    model: ${OPENAI_MODEL:gpt-4}
+    temperature: 0.7
+    max-tokens: 2000
+
+  embedding:
+    model: ${EMBEDDING_MODEL:text-embedding-ada-002}
+    dimension: 1536
+
+# Milvus配置
+milvus:
+  host: ${MILVUS_HOST:localhost}
+  port: ${MILVUS_PORT:19530}
+  database: ${MILVUS_DATABASE:ai_rag_db}
+  collection:
+    name: ${MILVUS_COLLECTION:knowledge_base}
+    dimension: 1536
+    metric-type: COSINE
+    index-type: HNSW
+
+# Agent配置
+agent:
+  max-iterations: 5
+  max-tokens-per-turn: 1500
+  temperature: 0.7
+  tools:
+    enabled:
+      - calculator
+      - weather
+      - math
+      - search
+      - datetime
+
+# 缓存配置
+cache:
+  guava:
+    max-size: 1000
+    expire-after-write: 30m
+    expire-after-access: 10m
+
+# 监控配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    export:
+      prometheus:
+        enabled: true
+
+# 日志配置
+logging:
+  level:
+    com.ai.rag: DEBUG
+    org.springframework.web: DEBUG
+    dev.langchain4j: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+---
+# 开发环境配置
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: jdbc:mysql://localhost:3306/ai_rag_db_dev?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: devpassword
+
+logging:
+  level:
+    com.ai.rag: DEBUG
+    org.springframework.web: DEBUG
+    dev.langchain4j: DEBUG
+
+---
+# 测试环境配置
+spring:
+  config:
+    activate:
+      on-profile: test
+  datasource:
+    url: jdbc:h2:mem:testdb
+    username: sa
+    password: password
+    driver-class-name: org.h2.Driver
+
+logging:
+  level:
+    root: WARN
+    com.ai.rag: INFO
