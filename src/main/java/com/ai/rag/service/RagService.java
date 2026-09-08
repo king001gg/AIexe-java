@@ -24,6 +24,7 @@ public class RagService {
     private final DocumentRepository documentRepository;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final EmbeddingModel embeddingModel;
+    private final MilvusVectorStore milvusVectorStore;
 
     /**
      * 检索相关知识
@@ -58,32 +59,17 @@ public class RagService {
     }
 
     /**
-     * 向量搜索
+     * 向量搜索（Milvus ANN 近似最近邻检索）
+     * 返回按相似度降序排列的向量 ID 列表
      */
     private List<String> searchVectors(float[] queryVector, int topK) {
-        try {
-            // 这里应该使用Milvus SDK进行向量搜索
-            // 由于Milvus Java SDK较为复杂，这里简化为返回所有向量ID
-            // 实际项目中需要实现完整的向量搜索逻辑
+        log.info("Performing Milvus ANN search with dimension: {}", queryVector.length);
 
-            log.info("Performing vector search with dimension: {}", queryVector.length);
-
-            // 模拟向量搜索结果
-            List<String> allVectorIds = documentRepository.findAll().stream()
-                .map(Document::getVectorId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-
-            // 随机选择topK个（实际应该根据相似度排序）
-            Collections.shuffle(allVectorIds);
-            return allVectorIds.stream()
-                .limit(topK)
-                .collect(Collectors.toList());
-
-        } catch (Exception e) {
-            log.error("Error in vector search", e);
-            return Collections.emptyList();
-        }
+        // Milvus 不可用或检索失败时返回空列表，由调用方回退到关键词检索
+        List<MilvusVectorStore.SearchHit> hits = milvusVectorStore.search(queryVector, topK);
+        return hits.stream()
+            .map(MilvusVectorStore.SearchHit::getId)
+            .collect(Collectors.toList());
     }
 
     /**

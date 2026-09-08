@@ -33,6 +33,7 @@ public class DocumentService {
     private final DocumentRepository documentRepository;
     private final RagService ragService;
     private final EmbeddingModel embeddingModel;
+    private final MilvusVectorStore milvusVectorStore;
 
     /**
      * 上传并处理文档
@@ -155,23 +156,22 @@ public class DocumentService {
      * 保存向量到Milvus
      */
     private String saveVectorToMilvus(String text) {
+        String vectorId = UUID.randomUUID().toString();
         try {
             // 生成文本向量
             dev.langchain4j.data.embedding.Embedding embedding = embeddingModel.embed(text).content();
             float[] vector = embedding.vector();
 
-            // 这里应该使用Milvus SDK插入向量
-            // 由于Milvus Java SDK较为复杂，这里简化为返回UUID
-            // 实际项目中需要实现完整的向量插入逻辑
-
-            String vectorId = UUID.randomUUID().toString();
+            // 真实插入向量到 Milvus（Milvus 不可用时内部优雅降级）
+            milvusVectorStore.insert(vectorId, vector);
 
             log.info("Saved vector to Milvus with ID: {}", vectorId);
             return vectorId;
 
         } catch (Exception e) {
             log.error("Error saving vector to Milvus", e);
-            return UUID.randomUUID().toString(); // 返回UUID作为占位符
+            // 嵌入失败时仍返回 UUID 作为降级标识，后续可通过关键词检索兜底
+            return vectorId;
         }
     }
 
@@ -199,12 +199,8 @@ public class DocumentService {
      * 从Milvus删除向量
      */
     private void deleteVectorFromMilvus(String vectorId) {
-        try {
-            // 这里应该使用Milvus SDK删除向量
-            log.info("Deleting vector from Milvus: {}", vectorId);
-        } catch (Exception e) {
-            log.error("Error deleting vector from Milvus", e);
-        }
+        log.info("Deleting vector from Milvus: {}", vectorId);
+        milvusVectorStore.delete(vectorId);
     }
 
     /**
