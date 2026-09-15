@@ -1,6 +1,7 @@
 package com.ai.rag.controller;
 
 import com.ai.rag.model.dto.DocumentUploadRequest;
+import com.ai.rag.model.dto.RetrievalHit;
 import com.ai.rag.model.entity.Document;
 import com.ai.rag.model.entity.KnowledgeBase;
 import com.ai.rag.repository.DocumentRepository;
@@ -135,5 +136,36 @@ public class DocumentController {
             @RequestParam(defaultValue = "5") int topK) {
         List<Document> results = ragService.searchRelevantDocuments(query, knowledgeBaseId, topK);
         return ResponseEntity.ok(results);
+    }
+
+    /**
+     * 搜索知识库（带多路召回排名与 RRF 融合分，便于观测与调参）
+     */
+    @GetMapping("/search/detailed")
+    public ResponseEntity<Map<String, Object>> searchDocumentsDetailed(
+            @RequestParam String query,
+            @RequestParam(required = false) Long knowledgeBaseId,
+            @RequestParam(defaultValue = "5") int topK) {
+        List<RetrievalHit> hits = ragService.searchWithFusion(query, knowledgeBaseId, topK);
+
+        List<Map<String, Object>> items = hits.stream().map(hit -> {
+            Map<String, Object> item = new HashMap<>();
+            item.put("documentId", hit.document().getId());
+            item.put("chunkId", hit.document().getChunkId());
+            item.put("title", hit.document().getTitle());
+            item.put("score", hit.score());
+            item.put("vectorRank", hit.vectorRank());
+            item.put("keywordRank", hit.keywordRank());
+            item.put("source", hit.source());
+            return item;
+        }).toList();
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("query", query);
+        response.put("knowledgeBaseId", knowledgeBaseId);
+        response.put("count", items.size());
+        response.put("hits", items);
+
+        return ResponseEntity.ok(response);
     }
 }

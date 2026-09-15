@@ -2,6 +2,9 @@ package com.ai.rag.util;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -10,6 +13,41 @@ import static org.junit.jupiter.api.Assertions.*;
  * 文档解析器测试类
  */
 class DocumentParserTest {
+
+    @Test
+    void testParsePlainTextUtf8() throws Exception {
+        String content = "知识库检索支持多路召回与 RRF 融合。\n\n第二段内容。";
+        File tempFile = File.createTempFile("upload_", "demo.txt");
+        Files.write(tempFile.toPath(), content.getBytes(StandardCharsets.UTF_8));
+
+        try {
+            assertEquals(content, DocumentParser.parseDocument(tempFile));
+        } finally {
+            tempFile.delete();
+        }
+    }
+
+    @Test
+    void testParseMarkdown() throws Exception {
+        File tempFile = File.createTempFile("upload_", "readme.md");
+        Files.write(tempFile.toPath(), "# 标题\n正文".getBytes(StandardCharsets.UTF_8));
+
+        try {
+            assertEquals("# 标题\n正文", DocumentParser.parseDocument(tempFile));
+        } finally {
+            tempFile.delete();
+        }
+    }
+
+    @Test
+    void testUnsupportedFileTypeThrows() throws Exception {
+        File tempFile = File.createTempFile("upload_", "demo.zip");
+        try {
+            assertThrows(IllegalArgumentException.class, () -> DocumentParser.parseDocument(tempFile));
+        } finally {
+            tempFile.delete();
+        }
+    }
 
     @Test
     void testChunkDocument() {

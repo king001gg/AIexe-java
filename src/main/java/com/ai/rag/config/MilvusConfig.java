@@ -1,21 +1,22 @@
 package com.ai.rag.config;
 
-import io.milvus.client.MilvusServiceClient;
-import io.milvus.param.ConnectParam;
-import jakarta.annotation.PostConstruct;
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
+import dev.langchain4j.store.embedding.milvus.MilvusEmbeddingStore;
+import io.milvus.param.IndexType;
+import io.milvus.param.MetricType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
 
 /**
- * Milvus向量数据库配置类
+ * Milvus 向量库配置类
  *
- * 配置：
- * - Milvus连接参数
- * - 集合创建
- * - 字段定义
+ * 基于 LangChain4j 官方的 {@link MilvusEmbeddingStore} 提供 {@link EmbeddingStore}：
+ * - 集合创建、HNSW 索引构建、向量插入/检索全部由官方实现封装
+ * - 当 Milvus 不可用（连接失败）时，优雅降级为内存向量库，不影响主流程
  */
 @Slf4j
 @Configuration
@@ -36,35 +37,50 @@ public class MilvusConfig {
     @Value("${milvus.collection.dimension}")
     private int dimension;
 
-    @Value("${milvus.collection.metric-type}")
+    @Value("${milvus.collection.metric-type:COSINE}")
     private String metricType;
 
-    @Value("${milvus.collection.index-type}")
+    @Value("${milvus.collection.index-type:HNSW}")
     private String indexType;
 
     /**
-     * 创建Milvus客户端
-     * local 环境不创建（避免启动时连接失败）
+     * 向量存储（Milvus 优先，不可用时回退内存）
      */
     @Bean
-    @Profile("!local")
-    public MilvusServiceClient milvusClient() {
-        ConnectParam connectParam = ConnectParam.newBuilder()
-                .withHost(host)
-                .withPort(port)
-                .build();
-
-        return new MilvusServiceClient(connectParam);
+    public EmbeddingStore<TextSegment> embeddingStore() {
+        try {
+            MilvusEmbeddingStore store = MilvusEmbeddingStore.builder()
+                    .host(host)
+                    .port(port)
+                    .collectionName(collectionName)
+                    .dimension(dimension)
+                    .indexType(resolveIndexType())
+                    .metricType(resolveMetricType())
+                    .databaseName(database)
+                    .build();
+            log.info("Milvus 向量库已初始化：collection={}, dimension={}", collectionName, dimension);
+            return store;
+        } catch (Exception e) {
+            log.warn("Milvus 不可用，回退内存向量库：{}", e.getMessage());
+            return new InMemoryEmbeddingStore<>();
+        }
     }
 
-    /**
-     * 初始化向量集合
-     * 在Bean初始化完成后执行
-     */
-    @PostConstruct
-    public void initMilvusCollection() {
-        log.info("Initializing Milvus collection: {}", collectionName);
-        // 注意：实际连接Milvus时再创建集合，这里仅记录日志
-        // 避免在无Milvus环境时启动失败
+    private MetricType resolveMetricType() {
+        try {
+            return MetricType.valueOf(metricType.trim().toUpperCase());
+        } catch (Exception e) {
+            log.warn("未知的 Milvus 度量类型：{}，回退为 COSINE", metricType);
+            return MetricType.COSINE;
+        }
+    }
+
+    private IndexType resolveIndexType() {
+        try {
+            return IndexType.valueOf(indexType.trim().toUpperCase());
+        } catch (Exception e) {
+            log.warn("未知的 Milvus 索引类型：{}，回退为 HNSW", indexType);
+            return IndexType.HNSW;
+        }
     }
 }

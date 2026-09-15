@@ -52,7 +52,8 @@ public class TokenCounter {
                 outputPrice = 0.00004;
         }
 
-        return (inputTokens * inputPrice / 1000) + (outputTokens * outputPrice / 1000);
+        // inputPrice / outputPrice 均为「每 token 单价」，故直接相乘（原实现多除了 1000，导致成本被低估 1000 倍）
+        return (inputTokens * inputPrice) + (outputTokens * outputPrice);
     }
 
     /**

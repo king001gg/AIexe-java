@@ -73,4 +73,22 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
      * 根据向量ID列表查找文档
      */
     List<Document> findByVectorIdIn(List<String> vectorIds);
+
+    /**
+     * 根据向量ID列表查找文档（限定知识库）
+     *
+     * 在 SQL 层过滤知识库，避免访问 LAZY 关联触发 LazyInitializationException（检索链路不在事务内）
+     */
+    @Query("SELECT d FROM Document d WHERE d.vectorId IN :vectorIds AND d.knowledgeBase.id = :knowledgeBaseId")
+    List<Document> findByVectorIdInAndKnowledgeBaseId(@Param("vectorIds") List<String> vectorIds,
+                                                      @Param("knowledgeBaseId") Long knowledgeBaseId);
+
+    /**
+     * 全库关键词搜索（不限定知识库）
+     */
+    @Query("SELECT d FROM Document d WHERE " +
+           "LOWER(d.title) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(d.content) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "ORDER BY d.chunkIndex")
+    List<Document> searchByKeywordAll(@Param("keyword") String keyword);
 }

@@ -1,0 +1,38 @@
+{
+  "name": "default",
+  "description": "检索质量基线评测集。expected 的每一项是一个「应有结果」：可以填分块 chunkId（精确匹配），也可以填期望出现在分块标题/正文里的关键词（不区分大小写子串匹配）。下面的用例是按本项目技术栈写的示例，请按自己知识库的实际内容替换 question 与 expected，否则指标没有意义。",
+  "knowledgeBaseId": null,
+  "topK": 5,
+  "cases": [
+    {
+      "id": "q1",
+      "question": "什么是多路召回，为什么要做融合",
+      "expected": ["多路召回"]
+    },
+    {
+      "id": "q2",
+      "question": "RRF 倒数排名融合的公式是什么",
+      "expected": ["RRF", "倒数排名"]
+    },
+    {
+      "id": "q3",
+      "question": "Milvus 用什么索引做近似最近邻检索",
+      "expected": ["Milvus", "HNSW"]
+    },
+    {
+      "id": "q4",
+      "question": "向量召回和关键词召回的分数为什么不能直接加权",
+      "expected": ["分数", "量纲"]
+    },
+    {
+      "id": "q5",
+      "question": "系统在 Milvus 不可用时如何降级",
+      "expected": ["降级", "内存"]
+    },
+    {
+      "id": "q6",
+      "question": "文档上传后是怎么切分成块的",
+      "expected": ["分块", "chunk"]
+    }
+  ]
+}

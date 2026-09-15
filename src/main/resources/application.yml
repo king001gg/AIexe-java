@@ -30,14 +30,26 @@ spring:
           max-wait: -1ms
 
   # JPA配置
+  # 表结构由 Flyway 管理（见 db/migration/{vendor}），JPA 不再自动建表/改表。
+  # 如需在启动时校验实体与迁移脚本是否漂移，可在本机有 MySQL 时改为 validate。
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
     show-sql: true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQL8Dialect
         format_sql: true
+
+  # Flyway 数据库迁移配置
+  # {vendor} 由 Spring Boot 解析为实际数据库厂商（mysql / h2），
+  # 用于隔离方言差异：H2 不支持 ENGINE、建表内联 INDEX、ON UPDATE CURRENT_TIMESTAMP。
+  # baseline-on-migrate：兼容由 ddl-auto: update 建起来的存量库
+  #（已有表时基线化到 V1 而非重跑；空库正常执行 V1）。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/{vendor}
+    baseline-on-migrate: true
 
   # 文件上传配置
   servlet:
@@ -73,6 +85,9 @@ milvus:
 agent:
   max-iterations: 5
   max-tokens-per-turn: 1500
+  max-history-messages: 20
+  # SSE 流式响应超时（毫秒）
+  stream-timeout-ms: 180000
   temperature: 0.7
   tools:
     enabled:
@@ -81,6 +96,48 @@ agent:
       - math
       - search
       - datetime
+
+# RAG 检索配置（多路召回 + RRF 融合）
+rag:
+  retrieval:
+    # 向量语义召回深度
+    vector-top-k: 20
+    # 关键词稀疏召回深度
+    keyword-top-k: 20
+    # 关键词扩展（中文 2-gram）后的最大 term 数，控制 DB 往返次数
+    max-keyword-terms: 8
+    # 向量召回最低相似度：调高更精确、调低召回更全（0.3 与 Stage 0 前的对话注入阈值一致）
+    min-score: 0.3
+    # RRF 平滑常数 k（Cormack et al. 2009 建议 60）
+    rrf-k: 60
+    # 融合后注入对话上下文的分块数
+    final-top-k: 5
+  # 检索评测数据集（Stage 4）
+  evaluation:
+    dataset: classpath:evaluation/retrieval-cases.json
+
+# 安全配置（API Key 认证）
+# enabled=false 时完全放行（本地开发/单测用），生产置为 true 并配置密钥。
+security:
+  enabled: ${SECURITY_ENABLED:true}
+  header: X-API-Key
+  # 允许的密钥列表：name 仅用于日志与限流分桶标识，勿填明文以外的敏感信息
+  api-keys:
+    - name: default
+      key: ${API_KEY:dev-api-key-change-me}
+  # 免认证路径（Ant 风格，相对 context-path=/api 之后的路径）
+  permit-all:
+    - /actuator/health
+    - /actuator/info
+    - /error
+
+# 限流配置（基于 Guava RateLimiter 的按调用方令牌桶）
+rate-limit:
+  enabled: ${RATE_LIMIT_ENABLED:true}
+  # 每分钟允许的请求数（单调用方）
+  requests-per-minute: 60
+  # 突发容量（瞬时允许的额外请求数）
+  burst: 10
 
 # 缓存配置
 cache:
@@ -136,10 +193,22 @@ spring:
     activate:
       on-profile: test
   datasource:
-    url: jdbc:h2:mem:testdb
+    # 与 local profile 保持一致的 H2 兼容设置：
+    # MODE=MySQL 让 H2 接受 MySQL 方言；NON_KEYWORDS 放行 value 等列名
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE
     username: sa
     password: password
     driver-class-name: org.h2.Driver
+  # 表结构由 Flyway 的 h2 迁移脚本创建
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+security:
+  enabled: false
+
+rate-limit:
+  enabled: false
 
 logging:
   level:

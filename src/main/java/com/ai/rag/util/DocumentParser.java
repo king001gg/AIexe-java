@@ -38,9 +38,18 @@ public class DocumentParser {
             return parseWordDocx(file);
         } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
             return parseExcel(file);
+        } else if (fileName.endsWith(".txt") || fileName.endsWith(".md")) {
+            return parsePlainText(file);
         } else {
             throw new IllegalArgumentException("Unsupported file type: " + fileName);
         }
+    }
+
+    /**
+     * 解析纯文本 / Markdown 文档（UTF-8）
+     */
+    private static String parsePlainText(File file) throws IOException {
+        return new String(java.nio.file.Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /**

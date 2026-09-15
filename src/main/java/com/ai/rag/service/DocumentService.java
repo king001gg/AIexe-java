@@ -7,7 +7,11 @@ import com.ai.rag.repository.DocumentRepository;
 import com.ai.rag.repository.KnowledgeBaseRepository;
 import com.ai.rag.util.DocumentParser;
 import com.ai.rag.util.TokenCounter;
+import dev.langchain4j.data.document.Metadata;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,7 +37,7 @@ public class DocumentService {
     private final DocumentRepository documentRepository;
     private final RagService ragService;
     private final EmbeddingModel embeddingModel;
-    private final MilvusVectorStore milvusVectorStore;
+    private final EmbeddingStore<TextSegment> embeddingStore;
 
     /**
      * 上传并处理文档
@@ -126,8 +130,12 @@ public class DocumentService {
             document.setChunkIndex(i);
             document.setTokens(TokenCounter.estimateTokens(chunk));
 
-            // 生成向量并存储到Milvus
-            String vectorId = saveVectorToMilvus(chunk);
+            // 生成向量并存储到向量库（Milvus 不可用时内部优雅降级）
+            Metadata metadata = new Metadata()
+                    .put("chunkId", document.getChunkId())
+                    .put("knowledgeBaseId", String.valueOf(knowledgeBase.getId()))
+                    .put("title", document.getTitle());
+            String vectorId = saveVectorToEmbeddingStore(chunk, metadata);
             document.setVectorId(vectorId);
 
             // 保存到数据库
@@ -153,25 +161,23 @@ public class DocumentService {
     }
 
     /**
-     * 保存向量到Milvus
+     * 生成向量并写入向量库
      */
-    private String saveVectorToMilvus(String text) {
-        String vectorId = UUID.randomUUID().toString();
+    private String saveVectorToEmbeddingStore(String text, Metadata metadata) {
         try {
             // 生成文本向量
-            dev.langchain4j.data.embedding.Embedding embedding = embeddingModel.embed(text).content();
-            float[] vector = embedding.vector();
+            Embedding embedding = embeddingModel.embed(text).content();
 
-            // 真实插入向量到 Milvus（Milvus 不可用时内部优雅降级）
-            milvusVectorStore.insert(vectorId, vector);
+            // 写入向量库（Milvus 不可用时 embeddingStore 已回退为内存实现）
+            String vectorId = embeddingStore.add(embedding, TextSegment.from(text, metadata));
 
-            log.info("Saved vector to Milvus with ID: {}", vectorId);
+            log.info("Saved vector to embedding store with ID: {}", vectorId);
             return vectorId;
 
         } catch (Exception e) {
-            log.error("Error saving vector to Milvus", e);
+            log.error("Error saving vector to embedding store", e);
             // 嵌入失败时仍返回 UUID 作为降级标识，后续可通过关键词检索兜底
-            return vectorId;
+            return UUID.randomUUID().toString();
         }
     }
 
@@ -182,10 +188,10 @@ public class DocumentService {
     public void deleteKnowledgeBase(Long knowledgeBaseId) {
         log.info("Deleting knowledge base with ID: {}", knowledgeBaseId);
 
-        // 删除所有文档向量（从Milvus）
+        // 删除所有文档向量（从向量库）
         List<Document> documents = documentRepository.findByKnowledgeBaseId(knowledgeBaseId);
         for (Document doc : documents) {
-            deleteVectorFromMilvus(doc.getVectorId());
+            deleteVectorFromEmbeddingStore(doc.getVectorId());
         }
 
         // 删除文档（数据库）
@@ -196,11 +202,18 @@ public class DocumentService {
     }
 
     /**
-     * 从Milvus删除向量
+     * 从向量库删除向量
      */
-    private void deleteVectorFromMilvus(String vectorId) {
-        log.info("Deleting vector from Milvus: {}", vectorId);
-        milvusVectorStore.delete(vectorId);
+    private void deleteVectorFromEmbeddingStore(String vectorId) {
+        if (vectorId == null) {
+            return;
+        }
+        log.info("Deleting vector from embedding store: {}", vectorId);
+        try {
+            embeddingStore.remove(vectorId);
+        } catch (Exception e) {
+            log.warn("删除向量失败：{}", e.getMessage());
+        }
     }
 
     /**

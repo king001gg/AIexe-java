@@ -2,57 +2,75 @@ package com.ai.rag.service;
 
 import com.ai.rag.model.dto.ChatRequest;
 import com.ai.rag.model.dto.ChatResponse;
-import com.ai.rag.util.ContextWindowManager;
+import com.ai.rag.model.entity.Conversation;
+import com.ai.rag.model.entity.Message;
 import com.ai.rag.util.TokenCounter;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.service.Result;
+import dev.langchain4j.service.tool.ToolExecution;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Agent核心服务
- * 实现ReAct模式（Thought→Action→Observation）的Agent循环
+ * Agent核心服务（非流式）
+ *
+ * 通过 LangChain4j {@link Assistant}（AiServices）处理请求，
+ * 由框架自动完成 RAG 检索、工具调用（function calling）与多轮记忆。
+ *
+ * <p>Stage 3：改用 {@link Result} 接收返回值，从而拿到**真实 token 用量**与**工具调用记录**，
+ * 取代此前的纯估算；模型未返回用量时由 {@link TokenUsageResolver} 自动回退估算。
+ * 流式对话见 {@link StreamingChatService}。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AgentService {
 
-    private final ChatLanguageModel chatLanguageModel;
-    private final Map<String, ToolExecutor> toolExecutors;
-    private final ContextWindowManager contextWindowManager;
+    private final Assistant assistant;
+    private final ConversationService conversationService;
+    private final MemoryPromptBuilder memoryPromptBuilder;
 
-    @Value("${agent.max-iterations:5}")
-    private int maxIterations;
+    @Value("${langchain4j.openai.model:gpt-4}")
+    private String modelName;
 
     /**
      * 处理用户请求
      */
-    @Transactional
     public ChatResponse processRequest(ChatRequest request) {
-        log.info("Processing chat request for session: {}", request.getSessionId());
+        String sessionId = request.getSessionId();
+        log.info("Processing chat request for session: {}", sessionId);
+
+        // 1. 会话落库（幂等获取/创建，避免事务横跨大模型调用）
+        Conversation conversation = conversationService.getOrCreateConversation(
+                sessionId, request.getNickname(), modelName);
+        Long conversationId = conversation.getId();
+
+        // 2. 用户消息落库（保存原始消息，不含注入的记忆）
+        conversationService.saveMessage(sessionId, Message.Role.USER, request.getMessage(),
+                TokenCounter.estimateTokens(request.getMessage()));
+
+        // 3. 记忆注入：把长期记忆拼进 prompt，让大模型回答时参考
+        String prompt = memoryPromptBuilder.build(request.getMessage(), sessionId);
 
         try {
-            // 1. 添加用户消息到上下文窗口
-            contextWindowManager.addMessage(request.getSessionId(), "user", request.getMessage());
+            Result<String> result = assistant.chat(sessionId, prompt);
+            String response = result.content();
 
-            // 2. 构建上下文
-            String context = buildContext(request.getSessionId());
+            // 4. 真实 token 用量（模型未返回时回退估算）
+            TokenUsageResolver.Resolved tokens =
+                    TokenUsageResolver.resolve(result.tokenUsage(), prompt, response);
 
-            // 3. 执行ReAct循环
-            String response = executeReactLoop(request, context, 0);
+            // 5. 助手消息落库
+            conversationService.saveMessage(sessionId, Message.Role.ASSISTANT, response, tokens.outputTokens());
 
-            // 4. 添加助手响应到上下文窗口
-            contextWindowManager.addMessage(request.getSessionId(), "assistant", response);
+            // 6. 首次对话时用用户消息摘要更新标题
+            String title = conversationService.updateTitleIfDefault(sessionId, summarizeTitle(request.getMessage()));
 
-            // 5. 构建响应
-            return buildResponse(response, request);
+            return buildResponse(response, request, conversationId, title, tokens, result.toolExecutions());
 
         } catch (Exception e) {
             log.error("Error processing chat request", e);
@@ -61,149 +79,54 @@ public class AgentService {
     }
 
     /**
-     * 构建上下文
+     * 用用户消息生成会话标题摘要（截断到 30 字符）
      */
-    private String buildContext(String sessionId) {
-        List<ContextWindowManager.ConversationContext.Message> context =
-            contextWindowManager.getContext(sessionId);
-
-        StringBuilder sb = new StringBuilder();
-        for (ContextWindowManager.ConversationContext.Message msg : context) {
-            sb.append(msg.role).append(": ").append(msg.content).append("\n");
-        }
-        return sb.toString();
-    }
-
-    /**
-     * 执行ReAct循环
-     * 实现 Thought → Action → Observation 的循环
-     */
-    private String executeReactLoop(ChatRequest request, String context, int iteration) {
-        if (iteration >= maxIterations) {
-            log.warn("Max iterations reached, generating final response");
-            return generateFinalResponse(request, context);
-        }
-
-        // 1. Thought - 思考步骤
-        String thought = think(request.getMessage(), context);
-        log.info("Thought {}: {}", iteration + 1, thought);
-
-        // 2. Action - 判断是否需要调用工具
-        if (request.getUseTools() != null && request.getUseTools() && needsTool(thought)) {
-            String toolName = extractToolName(thought);
-            String toolInput = extractToolInput(thought);
-
-            if (toolName != null && toolExecutors.containsKey(toolName)) {
-                // 3. Observation - 执行工具并观察结果
-                ToolExecutor executor = toolExecutors.get(toolName);
-                String observation = executor.execute(toolInput);
-                log.info("Observation: {}", observation);
-
-                // 将观察结果加入上下文，继续循环
-                String enrichedContext = context + "\n工具观察结果: " + observation + "\n";
-                return executeReactLoop(request, enrichedContext, iteration + 1);
-            }
-        }
-
-        // 4. 生成最终响应
-        return generateFinalResponse(request, context);
-    }
-
-    /**
-     * 思考步骤
-     */
-    private String think(String query, String context) {
-        String prompt = String.format(
-            "你是一个智能助手。请思考如何回答用户的问题。\n\n" +
-            "上下文：\n%s\n\n" +
-            "用户问题：%s\n\n" +
-            "如果需要调用工具（如计算、查询天气、检索知识库等），请说明要调用哪个工具和参数；否则直接说明你的思考结果。",
-            context, query
-        );
-
-        try {
-            return chatLanguageModel.generate(prompt);
-        } catch (Exception e) {
-            log.warn("Error in thinking step, using fallback", e);
-            return "直接回答";
-        }
-    }
-
-    /**
-     * 判断是否需要调用工具
-     */
-    private boolean needsTool(String thought) {
-        String lower = thought.toLowerCase();
-        return lower.contains("调用工具") ||
-               lower.contains("tool") ||
-               lower.contains("计算") ||
-               lower.contains("天气") ||
-               lower.contains("检索") ||
-               lower.contains("查询");
-    }
-
-    /**
-     * 提取工具名称
-     */
-    private String extractToolName(String thought) {
-        if (thought.contains("计算") || thought.contains("calculator")) {
-            return "calculator";
-        } else if (thought.contains("天气") || thought.contains("weather")) {
-            return "weather";
-        } else if (thought.contains("数学") || thought.contains("math")) {
-            return "math";
-        } else if (thought.contains("检索") || thought.contains("search") || thought.contains("知识库")) {
-            return "search";
-        } else if (thought.contains("日期") || thought.contains("时间") || thought.contains("datetime")) {
-            return "datetime";
-        }
-        return null;
-    }
-
-    /**
-     * 提取工具输入
-     */
-    private String extractToolInput(String thought) {
-        // 简单提取：返回思考中的关键内容
-        return thought;
-    }
-
-    /**
-     * 生成最终响应
-     */
-    private String generateFinalResponse(ChatRequest request, String context) {
-        String prompt = String.format(
-            "你是一个智能助手，请根据以下信息回答用户的问题。\n\n" +
-            "上下文：\n%s\n\n" +
-            "用户问题：%s\n\n" +
-            "请直接给出清晰、准确的回答。",
-            context, request.getMessage()
-        );
-
-        try {
-            return chatLanguageModel.generate(prompt);
-        } catch (Exception e) {
-            log.error("Error generating final response", e);
-            return "抱歉，我暂时无法回答这个问题。";
-        }
+    private String summarizeTitle(String message) {
+        String text = message == null ? "" : message.trim();
+        return text.length() > 30 ? text.substring(0, 30) : text;
     }
 
     /**
      * 构建响应
      */
-    private ChatResponse buildResponse(String response, ChatRequest request) {
-        ContextWindowManager.TokenUsage tokenUsage =
-            contextWindowManager.getTokenUsage(request.getSessionId());
-
+    private ChatResponse buildResponse(String response,
+                                       ChatRequest request,
+                                       Long conversationId,
+                                       String title,
+                                       TokenUsageResolver.Resolved tokens,
+                                       List<ToolExecution> toolExecutions) {
         ChatResponse chatResponse = new ChatResponse();
+        chatResponse.setConversationId(String.valueOf(conversationId));
         chatResponse.setSessionId(request.getSessionId());
         chatResponse.setResponse(response);
-        chatResponse.setInputTokens(tokenUsage.inputTokens);
-        chatResponse.setOutputTokens(tokenUsage.outputTokens);
-        chatResponse.setTotalTokens(tokenUsage.totalTokens);
-        chatResponse.setCost(TokenCounter.calculateCost(
-            tokenUsage.inputTokens, tokenUsage.outputTokens, "gpt-4"));
-        chatResponse.setTimestamp(java.time.LocalDateTime.now());
+        chatResponse.setToolCalls(mapToolCalls(toolExecutions));
+        chatResponse.setInputTokens(tokens.inputTokens());
+        chatResponse.setOutputTokens(tokens.outputTokens());
+        chatResponse.setTotalTokens(tokens.totalTokens());
+        chatResponse.setCost(TokenCounter.calculateCost(tokens.inputTokens(), tokens.outputTokens(), modelName));
+        chatResponse.setConversationTitle(title);
+        chatResponse.setTimestamp(LocalDateTime.now());
         return chatResponse;
+    }
+
+    /**
+     * 工具执行记录 -> 响应中的 toolCalls
+     *
+     * 注意：{@link ToolExecution} 不携带失败状态（工具抛异常会中断链路而非返回记录），
+     * 因此此处统一标记 SUCCESS；权威的成败与错误信息以 {@code tool_calls} 表为准
+     * （由 {@code AgentTools} 落库）。
+     */
+    private List<ChatResponse.ToolCall> mapToolCalls(List<ToolExecution> toolExecutions) {
+        if (toolExecutions == null || toolExecutions.isEmpty()) {
+            return List.of();
+        }
+        return toolExecutions.stream().map(execution -> {
+            ChatResponse.ToolCall toolCall = new ChatResponse.ToolCall();
+            toolCall.setToolName(execution.request().name());
+            toolCall.setToolInput(execution.request().arguments());
+            toolCall.setToolOutput(execution.result());
+            toolCall.setStatus("SUCCESS");
+            return toolCall;
+        }).toList();
     }
 }

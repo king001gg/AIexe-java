@@ -41,6 +41,16 @@ class TokenCounterTest {
     }
 
     @Test
+    void testCalculateCostMatchesPerThousandPricing() {
+        // gpt-4: 输入 $0.03 / 1K tokens，输出 $0.06 / 1K tokens
+        // 1000 输入 + 500 输出 = 0.03 + 0.03 = $0.06
+        assertEquals(0.06, TokenCounter.calculateCost(1000, 500, "gpt-4"), 1e-9);
+
+        // 零 token 不产生成本
+        assertEquals(0.0, TokenCounter.calculateCost(0, 0, "gpt-4"), 1e-9);
+    }
+
+    @Test
     void testFormatTokenCount() {
         // 测试小于1000
         assertEquals("500", TokenCounter.formatTokenCount(500));
