@@ -2,11 +2,11 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 被测版本 | `ec98d0c`（分支 `feat/langchain4j-migration-hardening`）+ 未提交的测试代码 |
+| 被测版本 | `ec98d0c`（测试轮次基线，分支 `feat/langchain4j-migration-hardening`）+ 四轮修复 |
 | 技术栈 | Spring Boot 3.4 / Java 17 / LangChain4j 0.36.2 / Milvus / MySQL / Redis |
 | 测试框架 | JUnit 5 + AssertJ + MockMvc + JSONPath + JaCoCo 0.8.12 |
-| 执行日期 | 2026-09-15（测试轮次）、2026-09-16（三轮修复） |
-| 结论 | **162 个用例全绿；共发现 11 个缺陷（7 高 / 2 中 / 2 低）；其中 D1 / D2 / D6 / D7 / D8 / D10 / D11 已修复并验证，其余 4 个仅报告** |
+| 执行日期 | 2026-09-15（测试轮次）、2026-09-16（四轮修复） |
+| 结论 | **185 个用例全绿；共发现 11 个缺陷（7 高 / 2 中 / 2 低），已全部修复并验证** |
 
 > **修复轮次一（2026-09-16）**：修「HTTP 契约」层
 > —— **D10**（浏览器访问全接口被协商成 XML）、**D1**（框架异常被降级成 500）、
@@ -25,7 +25,12 @@
 > 用例数不变（162），其中两条缺陷快照测试翻转为正向契约断言，并新增一条可追溯性断言。
 > 见第十一节。
 >
-> 剩余 **D3 / D4 / D5 / D9 未修**，仍为仅报告。
+> **修复轮次四（2026-09-16）**：修完最后四个 —— **D3**（降级向量库 score 口径与 Milvus 不一致）、
+> **D4**（并发重复会话 + 缺唯一约束）、**D5**（并发 token 记账丢更新）、
+> **D9**（工具端点字段缺失静默 `success: true`）。
+> 用例数 162 → 185（+23），行覆盖 62.69% → **64.96%**。见第十二节。
+>
+> 至此 **11 个缺陷全部修复**，无遗留。
 
 ---
 
@@ -34,15 +39,16 @@
 ### 1.1 结果总览
 
 ```
-Tests run: 162, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 185, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
-测试规模从 70 个增长到 162 个（+92），覆盖了此前**完全没有测试**的四条主链路：
+测试规模从 70 个增长到 185 个（+115），覆盖了此前**完全没有测试**的四条主链路：
 对话落库、工具调用、多路召回注入、SSE 流式输出。
-（测试轮次结束时为 151 个；三轮修复中新增 11 个回归用例。）
+（测试轮次结束时为 151 个；四轮修复中共新增 34 个回归用例。）
 
-主代码最终覆盖率：**行 62.69% / 分支 57.09% / 指令 63.03% / 方法 71.83%**。
+主代码最终覆盖率：**行 64.96% / 分支 60.36% / 指令 65.27% / 方法 72.97%**。
+（测试轮次结束时为行 62.69% / 分支 57.09% / 指令 63.03% / 方法 71.83%。）
 
 ### 1.2 覆盖率前后对比
 
@@ -82,25 +88,25 @@ BUILD SUCCESS
 | **D6** | 🔴 高 | 同一知识库第二次上传文档**必定失败** | ✅ **已修复**（第十一节） |
 | **D8** | 🔴 高 | 4 个返回 JPA 实体的读端点全部 **500**（LazyInitialization） | ✅ **已修复**（第十节） |
 | **D7** | 🔴 高 | Redis 不可用时 `/actuator/health` 报 **503 DOWN**，服务无法就绪 | ✅ **已修复**（第十节） |
-| **D3** | 🔴 高 | 降级向量库的 score 语义与 Milvus 不一致，`min-score` 形同虚设 | 仅报告 |
+| **D3** | 🔴 高 | 降级向量库的 score 语义与 Milvus 不一致，`min-score` 形同虚设 | ✅ **已修复**（第十二节） |
 | **D10** | 🔴 高 | 浏览器访问时**全部接口**（含成功响应）被内容协商成 XML 而非 JSON | ✅ **已修复**（第九节） |
-| **D5** | 🟠 中 | 并发 token 记账撞唯一约束 `uk_session_date`，统计丢失 | 仅报告 |
-| **D4** | 🟠 中 | 并发首次访问同一 session 产生重复会话，会话被**永久打坏** | 仅报告 |
-| **D9** | 🟡 低 | 工具执行端点字段缺失时静默降级为 `success: true` | 仅报告 |
+| **D5** | 🟠 中 | 并发 token 记账撞唯一约束 `uk_session_date`，统计丢失 | ✅ **已修复**（第十二节） |
+| **D4** | 🟠 中 | 并发首次访问同一 session 产生重复会话，会话被**永久打坏** | ✅ **已修复**（第十二节） |
+| **D9** | 🟡 低 | 工具执行端点字段缺失时静默降级为 `success: true` | ✅ **已修复**（第十二节） |
 | **D2** | 🟡 低 | 404 响应体泄漏 Spring 内部措辞 | ✅ **已修复**（第九节） |
 | **D11** | 🔴 高 | 用过工具的会话查上下文必 **500**（`Map.of` 不接受 null） | ✅ **已修复**（第十节） |
 
 > D1~D6 来自自动化测试，D7~D10 来自 `local` profile 下的真实启动冒烟测试（见第七节），
 > D11 来自接入真实模型后的端到端验证（见第十节）。
-> 合计 **11 个缺陷：7 高 / 2 中 / 2 低**，其中 **7 个已修复**
-> （D1 / D2 / D6 / D7 / D8 / D10 / D11），4 个仅报告。
+> 合计 **11 个缺陷：7 高 / 2 中 / 2 低，已全部修复并验证**。
 
 **故障固化机制**：D1/D2/D3/D4/D5/D6 在测试轮次以「缺陷快照测试」（characterization test）固化，
-断言写的是**当前真实行为**。这正是本轮修复的抓手——D1/D2 修好后，
+断言写的是**当前真实行为**。这正是修复的抓手——D1/D2 修好后，
 `ErrorHandlingContractTest` 立刻从「断言 500」翻转为「断言 405/415/404」，
 失败信号精确指向需要更新的断言，缺陷不会悄悄漂移。
-D10 修复时新增了 `ContentNegotiationTest` 作为回归防护。
-（D7/D8/D9 仍无用例，修复时应一并补上。）
+D10 修复时新增了 `ContentNegotiationTest` 作为回归防护；
+D3/D4/D5 修复时同样把固化缺陷行为的并发用例**翻转**为期望值断言（见 12.5）。
+（最初无任何用例的 D7/D8/D9 也在各自修复中补齐了。）
 
 ---
 
@@ -133,10 +139,13 @@ D10 修复时新增了 `ContentNegotiationTest` 作为回归防护。
    原 bean 照样会被构造。必须在 bean 定义阶段就替换。
    替换后仍是功能等价的真实 `InMemoryEmbeddingStore`，不是 mock。
 
-2. **`rag.retrieval.min-score=0.55`**。这个值必须结合缺陷 D3 理解：
-   降级库返回的 score 是 `(cosine+1)/2`，完全无关的文本 score 也是 0.5。
-   用生产默认值 `0.3` 等价于「余弦 ≥ -0.4」，等于关掉阈值。
-   取 0.55 恰好等价于「原始余弦 ≥ 0.1」，既挡住零重叠又放行真实命中。
+2. ~~**`rag.retrieval.min-score=0.55`**~~ —— **D3 修好后已删除**，测试上下文回到生产默认
+   `0.3`。原先这个魔改值的来历：降级库返回的 score 是 `(cosine+1)/2`，完全无关的文本
+   score 也是 0.5，用生产默认值 `0.3` 等价于「余弦 ≥ -0.4」，等于关掉阈值；
+   取 0.55 恰好等价于「原始余弦 ≥ 0.1」。**那是在用映射后的分数迁就缺陷**——
+   现在 `ScoreNormalizingEmbeddingStore` 把两个 store 统一到余弦口径，
+   `min-score` 的含义在测试与生产下完全一致。（第 2 条改为 `spring.jpa.open-in-view=false`，
+   见 12.2。）
 
 ### 2.3 覆盖的测试维度
 
@@ -154,6 +163,9 @@ D10 修复时新增了 `ContentNegotiationTest` 作为回归防护。
 | **新增小计** | | **80** |
 | 原有单测（工具、解析、RRF、限流算法等） | | 70 |
 | **合计** | | **151** |
+
+> 上表是**测试轮次结束**时的规模快照（151）。此后四轮修复又新增 34 个用例，
+> 当前总数 **185**；其中轮次四新增的 23 个（D9 契约、D3 适配器、D4 迁移）见 12.5。
 
 ---
 
@@ -297,7 +309,7 @@ document.setChunkId(docId + "_chunk_" + i);
 
 ---
 
-### D3 🔴 降级向量库 score 语义与 Milvus 不一致
+### D3 🔴 降级向量库 score 语义与 Milvus 不一致 ｜ ✅ 已于 2026-09-16 修复（第十二节）
 
 **严重度：高（生产配置下）** ｜ **证据：`EmbeddingDiagTest`、`ChatFlowIntegrationTest#noHitMeansNoInjectionAndStillAnswers`** ｜ **位置：`RagService:142`、`MilvusConfig`**
 
@@ -345,12 +357,18 @@ double effectiveMinScore = (embeddingStore instanceof InMemoryEmbeddingStore)
 更稳妥的做法是给 `EmbeddingStore` 包一层适配器统一到余弦口径，
 避免这类「同一配置项在不同实现下语义漂移」的问题再次出现。
 
-> 附带说明：本报告的测试上下文使用 `min-score=0.55`（等价余弦 ≥ 0.1），
+> **采纳了后者**（适配器，见 12.2）。前者（在 `RagService` 调用点上按 `instanceof` 换算）
+> 被否掉：那样「余弦口径」这个契约就散落在调用点上，出现第二个调用方时必然漏掉。
+>
+> 附带说明：本报告原先的测试上下文使用 `min-score=0.55`（等价余弦 ≥ 0.1），
 > 就是为了让「无关问题不注入知识」这类断言在降级库下仍然成立。
+> 适配器落地后该 workaround 已删除，测试回到生产默认的 `0.3`——
+> 而且 `ChatFlowIntegrationTest#noHitMeansNoInjectionAndStillAnswers` 在 `0.3` 下
+> 依然通过，等于给这次修复补了一个端到端旁证（见 12.2）。
 
 ---
 
-### D5 🟠 并发 token 记账撞唯一约束
+### D5 🟠 并发 token 记账撞唯一约束 ｜ ✅ 已于 2026-09-16 修复（第十二节）
 
 **严重度：中** ｜ **证据：`BoundaryAndConcurrencyTest#concurrentTokenUsageRecordingRaces`** ｜ **位置：`TokenService:31-56`**
 
@@ -392,9 +410,14 @@ int accumulate(...);
 
 配合「更新行数为 0 则 insert，撞唯一键则重试一次」的逻辑。
 
+> **已按「累加 SQL + 插入重试」修复**（见 12.4）。没有用厂商原生 upsert：
+> 那会把 `{vendor}` 的分裂从迁移脚本扩散到仓库层，而 JPQL 累加两个库都跑得通。
+> 另有一个容易漏的点：`cost` 在 Java 侧算好，必须作为参数一起累加，
+> 否则要么重写定价表、要么丢成本。
+
 ---
 
-### D4 🟠 并发首次访问产生重复会话，且会话被永久打坏
+### D4 🟠 并发首次访问产生重复会话，且会话被永久打坏 ｜ ✅ 已于 2026-09-16 修复（第十二节）
 
 **严重度：中** ｜ **证据：`BoundaryAndConcurrencyTest#concurrentConversationCreationRaces`、`#duplicateConversationsBreakTheSessionPermanently`** ｜ **位置：`ConversationService:30-39`**
 
@@ -453,7 +476,14 @@ public Conversation getOrCreateConversation(String sessionId, String nickname, S
 }
 ```
 
+> ⚠️ **上面这段 Java 草稿不可照抄**（2026-09-16 修复时发现）：它在 `@Transactional`
+> 方法**内部**捕获唯一键冲突，而冲突会把当前事务标记为 rollback-only，
+> 在同一个事务里再查一次拿不到干净结果——会写出一个「看起来对、实际不行」的修复。
+> 正确做法是让捕获发生在**事务边界之外**，见 12.3。
+> 另外「数据库里先合并重复行再加约束」这一步也不能省，否则有存量脏数据的库直接升级失败。
+
 另建议把 `findBySessionId` 在业务层改为「取第一条 + 告警」，作为兜底容错。
+→ **本轮刻意不做**，理由见 12.7（加约束后该分支不可达，写不出会失败的测试）。
 
 ---
 
@@ -590,7 +620,7 @@ management:
 
 ---
 
-### D9 🟡 工具执行端点字段缺失时静默降级为 `success: true`
+### D9 🟡 工具执行端点字段缺失时静默降级为 `success: true` ｜ ✅ 已于 2026-09-16 修复（第十二节）
 
 **严重度：低** ｜ **证据：`local` profile 冒烟（见第七节）** ｜ **位置：`ToolController:50`**
 
@@ -634,6 +664,17 @@ if (!(raw instanceof String arguments) || arguments.isBlank()) {
 ```
 
 更彻底的做法是给每个工具定义一个带 `@NotBlank` 的请求 DTO，而不是吃 `Map`。
+
+> ⚠️ **上面这段代码片段不能照抄**（2026-09-16 修复时发现）：多出来的
+> `|| arguments.isBlank()` 会砍掉一个正常功能——`DateTimeTool` 对空参数的处理
+> 一路落到 `default` 分支，返回**当前日期时间**，即「空参数对 datetime 是合法调用」
+> （`AgentTools` 的 `@Tool` 描述里也写着「可为空」）。按散文口径实现：
+> **字段必须存在，值可为空**。见 12.1。
+>
+> 另外这里也**没有**采用 DTO + `@Valid`：那会产出全局 `ApiError` 形状
+> （`{"message":"参数校验失败","detail":"..."}`），与同一个控制器里「未知工具」的
+> `{"success":false,...}` 形状打架——`/tools` 的调用方读的是 `success`，
+> 不该让它同时面对两套错误体。
 
 ---
 
@@ -815,9 +856,12 @@ mockMvc.perform(get(CONTEXT_PATH + "/tools")
    D7 让 Pod 永远不 Ready（没有 Redis 时整个服务不可用），
    D8 让 4 个读端点在关掉 `open-in-view` 的环境里全部 500。
    两者都不会被当前自动化测试发现——测试跑在 H2 且 `open-in-view` 取了默认值。
-3. **修 D4 前先加唯一约束**——这是 D4 修复的前提，也是最后一道防线。
-4. **D3 需要一次配置口径的统一**，建议以适配器方式解决，顺带检查是否还有其它
-   「同一配置项在不同实现下语义漂移」的地方（例如 `MilvusConfig` 的 metric type）。
+3. ~~**修 D4 前先加唯一约束**~~ → **已按此修复**（第十二节。顺序反过来正是关键：
+   先合并存量重复行再加约束，否则迁移会在有脏数据的库上失败）。
+4. ~~**D3 需要一次配置口径的统一**~~ → **已按适配器方式修复**（第十二节），
+   `MilvusConfig` 的 metric type 也顺带加了非 `COSINE` 的启动告警。
+   仍未做的：其它「同一配置项在不同实现下语义漂移」的地方没有系统性排查，
+   只处理了向量分数这一处（已知的一处）。
 5. **把 `RetrievalEvaluator` 接入 CI**。现在它有端点、有指标、有评测集，
    但没有任何自动化断言——RAG 系统的质量回归只能靠它来兜。
 6. **补上「配置矩阵」测试**。D7 和 D8 的共同根因是「只在某一种配置下被测过」。
@@ -869,7 +913,7 @@ Started AiRagAgentApplication in 17.625 seconds
 | `POST /documents/upload`（同知识库第二次） | ❌ **500** → ✅ **200** | → **D6** 线上复现，已修复（第十一节） |
 | `GET /tools` | ✅ 200 | 5 个工具（**但浏览器 Accept 下是 XML**，见 7.5 → **D10**） |
 | `POST /tools/{name}/execute`（calculator/math/datetime/search） | ✅ 200 | 结果正确，如 `计算结果：1+2*3 = 7.000000` |
-| `POST /tools/calculator/execute`（字段名写错 / 空 body） | ⚠️ 200 + `success:true` | → **D9** |
+| `POST /tools/calculator/execute`（字段名写错 / 空 body） | ⚠️ 200 + `success:true` → ✅ **400** | → **D9** 线上复现，已修复（第十二节） |
 | `POST /memory/save` + `GET /memory/{sid}/{key}` | ✅ 200 | |
 | `GET /evaluation/info` / `POST /evaluation/retrieval` | ✅ 200 | 6 条用例，输出 recall/precision/MRR/hitRate |
 | `GET /chat/message`（G0 打 POST 端点） | ❌ **500** | → **D1** 线上复现（应为 405） |
@@ -1185,10 +1229,11 @@ INFO  RagService - Multi-recall fused: vector=0, keyword=1, returned=1, topSourc
 若要修，需要给 embedding 单独配一套 `base-url`/`api-key`（约 10 行配置 + 2 个 `@Value`），
 指向 OpenAI、硅基流动、阿里百炼等提供 embedding 的服务。
 
-### 10.9 仍未修
+### 10.9 当时仍未修（现已在第十二节清空）
 
-**D3**（降级向量库 score 口径）、**D4**（并发重复会话）、**D5**（并发 token 记账）、
-**D9**（工具端点静默 `success: true`）。~~D6~~ 已在第十一节修复。
+~~**D3**（降级向量库 score 口径）、**D4**（并发重复会话）、**D5**（并发 token 记账）、
+**D9**（工具端点静默 `success: true`）。~~ 全部已在第十二节修复。
+（D6 见第十一节。）**此清单已清空，11 个缺陷无遗留。**
 
 ---
 
@@ -1281,4 +1326,242 @@ doc_b3bc52f1662e4a6298c42529b058eafb_chunk_0
 根因只在服务端日志里。**本轮有意不动**——D6 修好后这条路径已不再必然触发，
 而改文案是「客户端该看到多少内部信息」的取舍，应统一设计成「可读的领域错误 + 409」，
 而不是在这里单独放宽（D2 已确立「不泄漏内部措辞」的原则）。
+
+---
+
+## 十二、修复轮次四（2026-09-16）：D3 / D4 / D5 / D9
+
+最后四个缺陷，也是**前三轮都没碰**的四个。它们的共同点：**都不影响「单用户顺着走一遍」
+的体验**——只有并发、降级、或调用方写错字段名时才现形。这就是为什么功能测试和手工冒烟
+全都漏过它们，也正是它们值得单独一轮的理由。
+
+### 12.1 D9：工具端点的字段契约（`ToolController`）
+
+**决策：`arguments` 字段必须存在，值可为空。**
+
+这一条必须先讲清楚，因为报告原件里散文和代码片段是矛盾的（散文说「缺失或非字符串 → 400」，
+片段里多了个 `arguments.isBlank()`）。两者不等价，而后者会砍掉一个**正常功能**：
+`DateTimeTool.extractQueryType("")` 一路落到 `default` → `generateDatetimeResponse`
+→ 输出当前日期时间。空参数对 `datetime` 是合法且有意义的调用。
+
+实现（约 10 行，内联校验，不引入 DTO）：
+
+| 请求 | 结果 |
+| --- | --- |
+| `{}`（字段缺失） | 400 `{"success":false,"message":"缺少必填字段 arguments"}` |
+| `{"input":"1+2"}`（字段名写错） | 400 同上 |
+| `{"arguments":123}` / `{...:{}}` | 400 `{"success":false,"message":"字段 arguments 必须是字符串"}` |
+| `{"arguments":""}` | 200，正常返回当前时间 |
+| `{"arguments":null}` | 200，同上（字段在，就是「没有参数」） |
+| `{"arguments":"1+2"}`（calculator） | 200，`result` 含 `3.0`（回归） |
+| `{"arguments":""}` + 未知工具 | 400 `{"success":false,"message":"工具不存在：x"}` |
+
+`@RequestBody` 加了 `required = false`：否则空 body 会先抛 `HttpMessageNotReadableException`
+（虽然也是 400，但走的是全局 `ApiError` 形状，与同一控制器内其它错误体不一致）。
+
+**副作用（能力没丢，只是要求说出口）**：`POST /tools/datetime/execute {}`
+从 200 变成 400，想拿当前时间需显式传 `{"arguments":""}`。
+`AgentTools` 那条路（模型 function calling）传的是 `""` 而不是缺字段，且不经过 HTTP，
+**不受影响**。
+
+### 12.2 D3：把两个 store 的 score 口径统一到余弦
+
+#### 根因与唯一缺陷点
+
+已反编译 `langchain4j-core-0.36.2.jar` 确认（证据留在 `EmbeddingDiagTest`，断言未改，
+只改了它的定位：从「缺陷快照」改为「D3 的**根因证据**——适配器为何必须存在」）：
+
+| store | `search` 返回的 score | 过滤 |
+| --- | --- | --- |
+| `MilvusEmbeddingStore`（COSINE） | **原始余弦** ∈ [-1,1] | `score >= minScore` |
+| `InMemoryEmbeddingStore`（降级路径） | `(cosine+1)/2` ∈ [0,1] | `score >= minScore` |
+
+全系统**只有一处**真的读了相似度：`RagService.vectorRecall` 传给 store 的 `minScore`
+（它拿到结果后只取 `embeddingId`，把 score 丢掉了）。其余所有叫 score 的东西
+（`RetrievalHit.score`、`rrfScore` 元数据、`/documents/search/detailed` 的 `score`）
+都是 `RrfFusion` 的**排名分** `1.0/(k+rank+1)`，与向量相似度无关，天然免疫口径差异。
+所以适配器只影响「哪些命中被保留」，不影响融合、排序，也不改变任何 HTTP 响应里的 `score`。
+
+#### 为什么是适配器，不是调用点换算
+
+报告原建议是后者（在 `RagService` 里 `instanceof InMemoryEmbeddingStore` 就地换算）。
+否掉的理由：那样「余弦口径」这个契约就散落在调用点上，出现第二个调用方时必然漏掉。
+适配器把契约钉在 store 边界上。
+
+新增 `ScoreNormalizingEmbeddingStore`（装饰器）+ `EmbeddingStoreScoreConfig`（装配）：
+
+- 代理是 `InMemoryEmbeddingStore` 时：把传入的**余弦阈值**换算成 `(c+1)/2` 交给下游
+  按同口径过滤，再把返回的 score 换算回**原始余弦**。`EmbeddingSearchRequest`
+  把 `minScore` 约束在 `[0,1]`（`ValidationUtils.ensureBetween`），
+  而 `[0,1]` 经 `(c+1)/2` 整段映射到 `[0.5,1]`，**整个合法定义域都覆盖到了**。
+- 代理是 Milvus 时：原样透传（它本来就是余弦口径）。
+- 统一后的语义（与 Milvus 完全一致）：`min-score` 一律是「**余弦 ≥ X**」。
+  推论：`0.0` 表示「非余弦负相关」而不是「不过滤」；但本项目调用方只有
+  `RagService.vectorRecall`（`@Value` 恒有值），行为不变。
+- `metric-type` 非 `COSINE` 时打 warn。**只告警不改行为**：那是配置错误，
+  该让人去改配置，而不是擅自撤掉适配器把一个配置问题变成运行期故障
+  （`EmbeddingStoreScoreConfigTest` 把这一点钉住了）。
+
+#### 两个必须处理的坑（都不是读代码能看出来的）
+
+1. **适配器不能写在 `MilvusConfig.embeddingStore()` 里**。测试上下文用
+   `StubModelsConfig.replaceMilvusWithInMemoryStore()` 这个 `BeanFactoryPostProcessor`
+   **按名字删掉并重新注册**了 `embeddingStore` Bean 定义——写在那个 Bean 方法里的包装
+   在测试里根本不会执行，D3 会「只在测试里看起来修好了」。
+   正确接法：保留 `embeddingStore` 为原始 store，另加一个 `@Primary` 包装 Bean
+   （业务代码都是按类型构造注入 → 拿到包装器；按名替换不受影响）。
+2. **`EmbeddingStore` 在 0.36.2 里只有 5 个抽象方法**（`add`×3 + `addAll`×2），
+   `remove`×4 与 `search` 都是 `default`——而接口的 `default remove*` 抛
+   `UnsupportedOperationException`。不显式覆盖它们，`DocumentService.deleteVectorFromEmbeddingStore`
+   的 `embeddingStore.remove(vectorId)` 就会抛异常，**而它在自己的 `catch (Exception e)`
+   里被吞成一行 warn 日志**：表现为「删知识库后向量悄悄留在库里」，没有任何测试会红。
+   四个 `remove` 重载现已逐个委托并被逐个断言（`add`/`addAll` 那 5 个是抽象方法，
+   漏掉是编译错误，所以不需要逐个测——这也是该适配器仍有 4 行未被覆盖的原因）。
+
+#### 顺带清理的测试上下文
+
+- `IntegrationTestSupport`：删掉 `rag.retrieval.min-score=0.55`，回到生产默认 `0.3`。
+- `SecuredApiTestSupport` / `RateLimitIntegrationTest`：这两处因「注解不合并」镜像了父类
+  属性列表，且**当时漏了 `spring.jpa.open-in-view=false`**（即这两个上下文跑在
+  `open-in-view=true` 下，D8 那类配置矩阵隐患）。现改为镜像该条。
+- `InfrastructureSmokeTest`：注入的已是 `@Primary` 包装器，断言改为
+  「是 `ScoreNormalizingEmbeddingStore` 且其 `delegate()` 是 `InMemoryEmbeddingStore`」——
+  一条断言同时守住装配与降级两件事。
+
+#### 端到端的旁证
+
+`ChatFlowIntegrationTest#noHitMeansNoInjectionAndStillAnswers` 此前**只能靠 0.55 这个
+魔改阈值成立**（无关文档 `(0+1)/2 = 0.5 < 0.55`）；删掉 workaround 后，它在生产默认 `0.3`
+下依然通过——因为余弦 0 现在被正确挡掉了。**它绿得比原来更有道理**，这就是 D3 修复的
+端到端旁证。用例本身一行没改。
+
+### 12.3 D4：先合并存量重复行，再加唯一约束
+
+#### 修法
+
+`ConversationService.getOrCreateConversation` 改为「撞唯一键后重查」，
+但**捕获发生在事务边界之外**——这是本节最容易写错的地方：
+
+> 唯一键冲突会把当前事务标记为 **rollback-only**，在同一个事务里再查一次拿不到干净结果。
+> 所以必须去掉 `@Transactional`（让每次 repository 调用各自成事务），
+> 并用 `saveAndFlush` 让冲突**在这里**立刻抛出，而不是拖到提交时才炸。
+> 报告原件的 Java 草稿正是写在 `@Transactional` 方法内部，照抄会得到
+> 一个「看起来对、实际不行」的修复（原件已就地标注，见 D4 节）。
+
+已核实 `AgentService` / `StreamingChatService` 都没有 `@Transactional`，
+即本方法从来不是更大事务的一部分——去掉注解不改变事务语义。
+
+新增 `V2__dedupe_conversations_and_add_unique_session.sql`（h2 / mysql 两份）：
+
+1. 建临时映射表 `conversation_dedup(old_id, keep_id)`，`keep_id = 同 session_id 下 MIN(id)`
+   （保留最早那条，它的 `created_at` 才是会话的真实起点）；
+2. **先把 `messages` 重新指向保留行**——`messages.conversation_id` 的外键是
+   `ON DELETE CASCADE`，先删会话会把消息**静默**带走。这是整个迁移里最要紧的一步；
+3. 再把 `tool_calls` 指过去——它没有外键，但同样被
+   `findByConversationIdOrderByCreatedAtDesc` 按 `conversation_id` 查询，不重指就留下
+   悬空引用（对查询而言记录等于消失了）。**这一步是原件计划里没有的**，
+   写迁移时才发现的同类问题；
+4. 删重复会话 → 加约束 → 拆脚手架。
+
+用临时映射表而非相关子查询，是为了绕开 MySQL 错误 1093（不能在 UPDATE/DELETE 的子查询里
+引用目标表）。建表语句**刻意不加 `IF NOT EXISTS`**：同名残留只可能来自上一次半途失败的
+迁移，这种情况应该报错让人来看。
+
+`Conversation` 实体补了 `@Table(uniqueConstraints = ...)` 与其它实体对齐
+（`ddl-auto: none` 下不产生 DDL，只表达意图）。
+
+### 12.4 D5：原子累加 + 插入重试
+
+`recordTokenUsage` 改为：先原子 `UPDATE`（`@Modifying @Query`，累加 input/output/total/cost），
+命中行就结束，没有读-改-写窗口；更新行数为 0 说明当天还没有行 → `saveAndFlush` 插入，
+**撞唯一键的那次被吞掉**，然后再累加一次。同样**不标 `@Transactional`**（理由同 12.3）。
+
+两个细节：
+
+- `cost` 在 Java 侧算好（`TokenCounter.calculateCost`），必须作为参数传进累加 SQL，
+  否则要么重写定价表、要么丢成本；
+- 插入用的 `newDailyRow(...)` 是**把既有的五行 setter 原样搬出来**，不是重写——
+  `created_at` 是 `nullable = false, updatable = false`，照搬既有写法就不会在实体钩子上翻车。
+
+不用厂商原生 upsert（H2 `MERGE INTO` / MySQL `ON DUPLICATE KEY UPDATE`）：
+仓库层是厂商中立的，走原生 SQL 会把 `{vendor}` 的分裂从迁移脚本扩散到仓库层。
+
+### 12.5 验证结果
+
+**全套回归**：
+
+```
+Tests run: 185, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+| 指标 | 轮次三后（162 用例） | 轮次四后（185 用例） |
+| --- | --- | --- |
+| 行覆盖 | 62.69% | **64.96%** |
+| 分支覆盖 | 57.09% | **60.36%** |
+| 指令覆盖 | 63.03% | **65.27%** |
+| 方法覆盖 | 71.83% | **72.97%** |
+
+新增 23 个用例：`ToolEndpointContractTest` 9（D9）、
+`ScoreNormalizingEmbeddingStoreTest` 8 + `EmbeddingStoreScoreConfigTest` 2（D3）、
+`ConversationDedupMigrationTest` 4（D4 迁移）。D4/D5 的两条并发用例**原地翻转**
+（原为固化缺陷行为），`BoundaryAndConcurrencyTest` 仍是 17 条。
+
+**每个新守卫都做了「先证明它会红」**（照 D6 的做法，临时 stash 后立刻还原）：
+
+| 缺陷 | 反证方法 | 实际观察到的红 |
+| --- | --- | --- |
+| D3 | 让 `wrap()` 直接返回未包装的 delegate | `ChatFlowIntegrationTest#noHitMeansNoInjectionAndStillAnswers:176`「无关问题不应把知识库内容注入 prompt」失败 + `InfrastructureSmokeTest:47` 失败 |
+| D4 | 把 `V2__*.sql` 移出仓库（保留新代码、不加约束） | 迁移专测 3 条失败（重复行未合并 / 消息与 tool_calls 未重指 / 约束没建上、重复插入成功）；`concurrentConversationCreationRaces`「只允许一条会话」**expected: 1 but was: 12**；`duplicateConversationsAreRejectedByUniqueConstraint`「Expecting code to raise a throwable」 |
+| D5 | `git stash` 掉 `TokenService.java` | `concurrentTokenUsageRecordingRaces` 的 `failures == 0` 失败 |
+| D9 | 恢复 `getOrDefault("arguments", "")` | `ToolEndpointContractTest` 5 条失败，其中 `{"arguments":null}` 由 200 变 **500** |
+
+> ⚠️ **反证过程中的一个真实教训（值得记下来）**：D4 的第一次反证**全绿**，看起来像
+> 「守卫咬不住」。原因不是测试写得松，而是 `target/classes` 里还留着上一次构建复制过去的
+> `V2__*.sql`——Maven 的 `process-resources` **不会删除源文件已消失的产物**，
+> 于是 Flyway 从 classpath 里照样找到了 V2。删掉 `target/classes` 下的残留副本后才复现出红。
+> 用「移走文件」而非「stash 代码」做反证时，必须连构建产物一起处理，
+> 否则得到的是一个**假的绿**——而假绿比不测更危险。
+
+**D4 迁移专测**（`ConversationDedupMigrationTest`，不启 Spring，自己拿 Flyway API 两步走）：
+先只迁到 V1 → 用裸 JDBC 造出 V1 允许、V2 不容的脏数据 → 迁 V2 → 断言。验证的是**真实迁移
+脚本**而不是等价的手写 SQL。四条用例：重复会话合并为一条（保留 `MIN(id)`）且两条消息都还在、
+都指向保留行；`tool_calls` 也重指且 `conversation_id IS NULL` 的那条不受误伤；
+**存量干净时迁移也照样跑通**（否则线上全是干净库反而升不了级）；约束真的生效且临时表已拆除。
+
+> 写这个用例时踩到两个坑，都是**测试自身的**、迁移本身没问题，记下来以免重犯：
+> ① `ResultSet.getLong` 把 SQL NULL 读成 `0`，让「conversation_id 为 NULL 的行」伪装成
+> 一条指向 `id=0` 的记录（已改用 `getObject(1, Long.class)`）；
+> ② AssertJ 的 `hasFieldOrPropertyWithValue("sqlState", ...)` 找不到属性——
+> `getSQLState()` 按 JavaBeans 规则反解出的属性名是 `SQLState`。现改为断言异常类型
+> `SQLIntegrityConstraintViolationException` + SQLState 以 `23` 开头。
+
+### 12.6 本轮局限（诚实清单）
+
+1. **D3 修好后无法从任何 HTTP 响应观察**。`RagService` 在排序后就丢弃了相似度，
+   所以没有一条端到端断言能直接证明「阈值语义已统一」。它的可观测面是 store 的 API 边界，
+   由 store 级测试守卫（`ScoreNormalizingEmbeddingStoreTest` 8 条），
+   端到端只能证到「prompt 注入决策在生产阈值 0.3 下正确」这一层。
+2. **`local` profile 的真实冒烟证明不了 D3**：DeepSeek 不提供 embedding 接口，
+   向量路恒为 0（见 10.8）。冒烟只能确认「应用能起、关键词检索与问答不受影响、
+   没把向量路改坏」。
+3. **真实 Milvus 路径仍未被任何自动化测试覆盖**（所有测试都跑在 `InMemoryEmbeddingStore` 上，
+   见第五节风险清单）。适配器在 Milvus 侧走的是「原样透传」分支，该分支由 mock 代理的
+   单元测试守卫，但**没有在真机 Milvus 上验证过**。
+4. **`mysql/V2__*.sql` 未经真机执行**（本机无 MySQL），与 `V1` 的局限一致，
+   只经过人工审阅和对 h2 版的逐句对照。另需注意 **MySQL 的 DDL 不在事务里**：
+   该迁移若中途失败会留下部分状态，需人工修复后 `flyway repair` 重跑（H2 版可整体回滚）。
+5. **V2 会不可逆地改写存量数据**（合并重复会话并重新挂载消息）——这正是选择
+   「先合并再建约束」而换来的代价，换来的是「不阻塞启动、不丢消息」。
+
+### 12.7 本轮明确不做
+
+| 不做的事 | 理由 |
+| --- | --- |
+| D4 的业务层「取第一条 + 告警」兜底（报告原建议） | 迁移合并 + 唯一约束之后数据库不可能有重复行，这段代码在任何真实路径上都**不可达**，也就写不出会失败的测试来保护它。加一段没人能触发的防御代码比不加更糟 |
+| 删掉 V1 里冗余的 `idx_conversations_session_id` | 加了唯一约束后它确实冗余，但删它要引入 `DROP INDEX` 的厂商差异语法，让一次「修并发缺陷」的迁移顺带承担索引调整的风险。留作**已知的无害冗余** |
+| `DocumentController` 上传错误契约重构 | D6 的遗留，属于「客户端该看到多少内部信息」的另一类问题（应统一成「可读的领域错误 + 409」），单独一轮处理 |
+| 引入 `EmbeddingStoreContentRetriever` | 全项目未使用（仅注释提及），不引入 |
+| 动 RRF / `RetrievalHit.score` / `/documents/search/detailed` 的 score | 它们都不是相似度，与 D3 无关 |
+| 系统性排查其它「同一配置项在不同实现下语义漂移」的地方 | 本轮只处理了向量分数这一处（已知的唯一一处），没有做全面审计 |
 
