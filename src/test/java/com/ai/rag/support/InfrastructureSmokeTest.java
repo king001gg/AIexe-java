@@ -1,5 +1,6 @@
 package com.ai.rag.support;
 
+import com.ai.rag.config.ScoreNormalizingEmbeddingStore;
 import com.ai.rag.service.Assistant;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.embedding.Embedding;
@@ -35,10 +36,17 @@ class InfrastructureSmokeTest extends IntegrationTestSupport {
     private EmbeddingStore<TextSegment> embeddingStore;
 
     @Test
-    @DisplayName("向量库降级：Milvus 不可用时立即回退内存实现，而不是等 10 秒超时")
+    @DisplayName("向量库装配：业务注入到的是「余弦口径包装器」，其代理是降级后的内存实现")
     void fallsBackToInMemoryStoreQuickly() {
+        // 业务代码按类型注入，拿到的是 EmbeddingStoreScoreConfig 里那个 @Primary 包装器
+        // （缺陷 D3：score 口径必须与 Milvus 的余弦口径一致），
+        // 它包着的才是上游降级出来的内存实现。两个事实都要守住：
+        // 包装器没了 → min-score 语义漂移；代理不是内存实现 → 说明这条路根本没降级成功。
         assertThat(embeddingStore)
-                .as("本机无 Milvus，应为快速降级后的内存实现")
+                .as("本机无 Milvus，业务侧拿到的应是余弦口径包装器")
+                .isInstanceOf(ScoreNormalizingEmbeddingStore.class);
+        assertThat(((ScoreNormalizingEmbeddingStore) embeddingStore).delegate())
+                .as("包装器内部应为快速降级后的内存实现，而不是仍在等 Milvus 超时")
                 .isInstanceOf(InMemoryEmbeddingStore.class);
     }
 

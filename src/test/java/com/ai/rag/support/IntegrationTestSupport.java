@@ -27,17 +27,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *       本机没有 Milvus，默认配置下 {@code MilvusEmbeddingStore} 会先阻塞约 10 秒的
  *       DEADLINE_EXCEEDED 才降级，每个测试上下文都要白付一次。</li>
  *
- *   <li><b>{@code rag.retrieval.min-score=0.55}</b>：这个值必须结合**缺陷 D3** 来理解。
- *       降级用的 {@code InMemoryEmbeddingStore} 返回的 score 是 {@code (cosine+1)/2}，
- *       余弦为 0 的完全无关文本 score 也是 0.5。因此阈值必须落在 0.5 与「有重合文本的得分」之间：
- *       0.55 恰好等价于「原始余弦 ≥ 0.1」，既挡住零重叠，又放行真实命中。
- *       用生产默认值 0.3 会等价于「余弦 ≥ -0.4」，等于不设阈值——「无关问题不注入知识」
- *       这类断言就完全失去意义。详见 {@code EmbeddingDiagTest} 与测试报告 D3。</li>
+ *   <li><b>这里**不再**覆盖 {@code rag.retrieval.min-score}</b>，阈值就是生产默认的 {@code 0.3}。
+ *       此前它被抬到 {@code 0.55} 是为了迁就**缺陷 D3**：降级用的
+ *       {@code InMemoryEmbeddingStore} 返回的 score 是 {@code (cosine+1)/2}，
+ *       余弦为 0 的无关文本 score 也有 0.5，必须把阈值抬到 0.5 以上才挡得住。
+ *       D3 修复后 store 边界已统一为余弦口径（见 {@code ScoreNormalizingEmbeddingStore}），
+ *       {@code 0.3} 就是「余弦 ≥ 0.3」，无关文本（余弦 0）自然被挡掉。
+ *       <b>测试阈值与生产一致，才有资格说「这条断言在生产也成立」。</b></li>
  * </ol>
  */
 @SpringBootTest(properties = {
-        "rag.retrieval.min-score=0.55",
-
         /*
          * 与生产（application-local.yml）对齐，关掉 Open Session in View。
          *

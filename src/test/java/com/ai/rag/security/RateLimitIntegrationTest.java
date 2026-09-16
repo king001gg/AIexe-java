@@ -30,7 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 因此任意随机串都能拿到独立桶。
  */
 @SpringBootTest(properties = {
-        "rag.retrieval.min-score=0.55",
+        // 与父类对齐（注解不合并，须显式复述）；min-score 不再覆盖，跟随生产默认值 0.3
+        "spring.jpa.open-in-view=false",
         "security.enabled=true",
         "security.api-keys[0].name=rate-limit-client",
         "security.api-keys[0].key=rate-limit-valid-key",

@@ -136,6 +136,9 @@ public class RagService {
         try {
             Embedding queryEmbedding = embeddingModel.embed(query).content();
 
+            // minScore 是**余弦相似度**阈值（缺陷 D3）：Milvus 的 COSINE 本来就是这个口径，
+            // 降级用的 InMemoryEmbeddingStore 返回的是 (cosine+1)/2，由 store 边界的
+            // ScoreNormalizingEmbeddingStore 统一换算。这里按余弦理解即可。
             EmbeddingSearchRequest.EmbeddingSearchRequestBuilder builder = EmbeddingSearchRequest.builder()
                     .queryEmbedding(queryEmbedding)
                     .maxResults(vectorTopK)
