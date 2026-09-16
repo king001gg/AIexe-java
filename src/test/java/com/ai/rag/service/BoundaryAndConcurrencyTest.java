@@ -19,6 +19,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -118,10 +120,10 @@ class BoundaryAndConcurrencyTest extends IntegrationTestSupport {
     @Test
     @DisplayName("边界：检索结果条数不超过 topK（跨知识库的全库检索同样受限）")
     void resultCountIsBoundedByTopK() {
-        // 刻意分两个知识库：写入同一个知识库会触发缺陷 D6（chunk_id 冲突），
-        // 那样这个用例就测不到 topK 了
-        indexDocument("多条知识库甲", "向量检索 关键词检索 融合排序 内容一号。");
-        indexDocument("多条知识库乙", "向量检索 关键词检索 融合排序 内容二号。");
+        // 两条内容写进**同一个**知识库，这样才真正测到「全库检索下 topK 是否生效」。
+        // （D6 修复前这里必须拆成两个知识库，否则第二次上传会撞 chunk_id 唯一键）
+        indexDocument("多条知识库", "向量检索 关键词检索 融合排序 内容一号。");
+        indexDocument("多条知识库", "向量检索 关键词检索 融合排序 内容二号。");
 
         String query = "向量检索 关键词检索 融合排序";
         assertThat(ragService.searchWithFusion(query, null, 1)).hasSize(1);
@@ -129,9 +131,9 @@ class BoundaryAndConcurrencyTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("缺陷 D6：同一个知识库第二次上传必定失败（chunk_id 只由 kbId+分块序号生成）")
-    void secondUploadToSameKnowledgeBaseFails() throws Exception {
-        indexDocument("只能传一次的知识库", "第一次上传的内容 ALPHA-1000。");
+    @DisplayName("D6 回归：同一个知识库可以反复追加内容，第二次上传不再失败")
+    void secondUploadToSameKnowledgeBaseSucceeds() throws Exception {
+        indexDocument("可增量维护的知识库", "第一次上传的内容 ALPHA-1000。");
 
         MockMultipartFile second = new MockMultipartFile("file", "second.txt", "text/plain",
                 "第二次上传的内容 BETA-2000。".getBytes(StandardCharsets.UTF_8));
@@ -139,45 +141,42 @@ class BoundaryAndConcurrencyTest extends IntegrationTestSupport {
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .multipart(CONTEXT_PATH + "/documents/upload")
                         .file(second)
-                        .param("knowledgeBaseName", "只能传一次的知识库")
+                        .param("knowledgeBaseName", "可增量维护的知识库")
                         .param("chunkSize", "1000")
                         .param("chunkOverlap", "0")
                         .contextPath(CONTEXT_PATH))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.documentCount").value(1));
 
         assertThat(countWhere("documents", "content LIKE '%BETA-2000%'"))
-                .as("第二次上传的内容完全没进去")
-                .isZero();
+                .as("第二次上传的内容必须真的进库——知识库要能增量维护")
+                .isEqualTo(1);
+
+        // 两批内容都在，且都能被检索到
+        assertThat(ragService.searchWithFusion("ALPHA-1000", null, 5)).isNotEmpty();
+        assertThat(ragService.searchWithFusion("BETA-2000", null, 5)).isNotEmpty();
     }
 
     @Test
-    @DisplayName("缺陷 D6 的后果：失败的上传是整体回滚的，用户看到的是无信息量的 500 文案")
-    void duplicateChunkIdRollsBackAtomicallyAndHidesTheCause() throws Exception {
-        // 一个知识库的名字一旦被用过，就再也传不进新内容——这是 D6 最直接的用户可见后果
-        indexDocument("被锁死的知识库", "首个分块 GAMMA-3000。");
+    @DisplayName("D6 回归：chunk_id 跨上传全局唯一，且每个分块可追溯到它来自哪一次上传")
+    void chunkIdIsUniqueAcrossUploadsAndTraceable() throws Exception {
+        indexDocument("多次上传的知识库", "首批分块 GAMMA-3000。");
+        indexDocument("多次上传的知识库", "第二批分块 DELTA-4000。");
 
-        MockMultipartFile second = new MockMultipartFile("file", "second.txt", "text/plain",
-                "第二份文件 DELTA-4000。".getBytes(StandardCharsets.UTF_8));
+        List<String> chunkIds = jdbcTemplate.queryForList(
+                "SELECT chunk_id FROM documents ORDER BY id", String.class);
 
-        String body = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .multipart(CONTEXT_PATH + "/documents/upload")
-                        .file(second)
-                        .param("knowledgeBaseName", "被锁死的知识库")
-                        .param("chunkSize", "1000")
-                        .param("chunkOverlap", "0")
-                        .contextPath(CONTEXT_PATH))
-                .andExpect(status().isInternalServerError())
-                .andReturn().getResponse()
-                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(chunkIds)
+                .as("chunk_id 必须全局唯一，否则 UNIQUE (knowledge_base_id, chunk_id) 必然冲突")
+                .doesNotHaveDuplicates()
+                .hasSize(2);
 
-        assertThat(body)
-                .as("错误文案被 DocumentService 的统一包装吞掉了根因，运维无法据此定位")
-                .contains("Failed to process document")
-                .doesNotContain("uk_knowledge_chunk");
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM documents", Integer.class))
-                .as("失败的上传不应留下半个分块")
-                .isEqualTo(1);
+        // 前缀是每次上传各自的 UUID：同一批次内共享前缀，不同批次前缀不同
+        assertThat(chunkIds.get(0)).startsWith("doc_").contains("_chunk_");
+        assertThat(chunkIds.get(0).substring(0, chunkIds.get(0).indexOf("_chunk_")))
+                .as("两次上传属于不同批次，前缀（文档身份）必须不同")
+                .isNotEqualTo(chunkIds.get(1).substring(0, chunkIds.get(1).indexOf("_chunk_")));
     }
 
     @Test

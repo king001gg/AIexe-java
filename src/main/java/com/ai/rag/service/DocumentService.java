@@ -118,6 +118,10 @@ public class DocumentService {
     private void saveDocumentsWithVectors(KnowledgeBase knowledgeBase, List<String> chunks, String originalFileName) {
         log.info("Processing {} chunks for knowledge base: {}", chunks.size(), knowledgeBase.getName());
 
+        // 本次上传的文档身份（缺陷 D6）：chunk_id 必须带上它，否则第二次往同一知识库
+        // 上传时分块序号从 0 重来，必然撞上 UNIQUE (knowledge_base_id, chunk_id)。
+        String documentId = UUID.randomUUID().toString().replace("-", "");
+
         for (int i = 0; i < chunks.size(); i++) {
             String chunk = chunks.get(i);
 
@@ -126,7 +130,7 @@ public class DocumentService {
             document.setKnowledgeBase(knowledgeBase);
             document.setTitle(extractTitle(chunk, originalFileName));
             document.setContent(chunk);
-            document.setChunkId(generateChunkId(knowledgeBase.getId(), i));
+            document.setChunkId(generateChunkId(documentId, i));
             document.setChunkIndex(i);
             document.setTokens(TokenCounter.estimateTokens(chunk));
 
@@ -145,9 +149,20 @@ public class DocumentService {
 
     /**
      * 生成分块ID
+     *
+     * <p><b>为什么前缀是「本次上传的文档 ID」而不是知识库 ID（缺陷 D6）：</b>
+     * 原先是 {@code String.format("kb_%d_chunk_%d", knowledgeBaseId, chunkIndex)}，
+     * 而 {@code chunkIndex} 是**本次上传内**的分块序号。第二次往同一知识库上传时它从 0
+     * 重新开始，于是必然重复插入 {@code kb_5_chunk_0}，撞上
+     * {@code UNIQUE (knowledge_base_id, chunk_id)}，{@code @Transactional} 让整个上传回滚
+     * —— 一个知识库名字只能用一次，再也传不进新内容。
+     *
+     * <p>改成「每次上传一个 UUID + 本次分块序号」后，chunk_id 天然全局唯一
+     * （{@code knowledge_base_id} 已不必参与去重），同一知识库可以反复追加、多文件入库，
+     * 且每个分块都能追溯到它来自哪一次上传。
      */
-    private String generateChunkId(Long knowledgeBaseId, int chunkIndex) {
-        return String.format("kb_%d_chunk_%d", knowledgeBaseId, chunkIndex);
+    private String generateChunkId(String documentId, int chunkIndex) {
+        return String.format("doc_%s_chunk_%d", documentId, chunkIndex);
     }
 
     /**

@@ -5,8 +5,8 @@
 | 被测版本 | `ec98d0c`（分支 `feat/langchain4j-migration-hardening`）+ 未提交的测试代码 |
 | 技术栈 | Spring Boot 3.4 / Java 17 / LangChain4j 0.36.2 / Milvus / MySQL / Redis |
 | 测试框架 | JUnit 5 + AssertJ + MockMvc + JSONPath + JaCoCo 0.8.12 |
-| 执行日期 | 2026-09-15（测试轮次）、2026-09-16（两轮修复） |
-| 结论 | **162 个用例全绿；共发现 11 个缺陷（7 高 / 2 中 / 2 低）；其中 D1 / D2 / D7 / D8 / D10 / D11 已修复并验证，其余 5 个仅报告** |
+| 执行日期 | 2026-09-15（测试轮次）、2026-09-16（三轮修复） |
+| 结论 | **162 个用例全绿；共发现 11 个缺陷（7 高 / 2 中 / 2 低）；其中 D1 / D2 / D6 / D7 / D8 / D10 / D11 已修复并验证，其余 4 个仅报告** |
 
 > **修复轮次一（2026-09-16）**：修「HTTP 契约」层
 > —— **D10**（浏览器访问全接口被协商成 XML）、**D1**（框架异常被降级成 500）、
@@ -20,7 +20,12 @@
 > **D11**（用过工具的会话查上下文必 500）——这是一个**只有真实模型才会触发**的缺陷，
 > 桩模型和 MockMvc 都覆盖不到。已修复。用例数 160 → 162，行覆盖 62.58% → **62.84%**。
 >
-> 剩余 **D3 / D4 / D5 / D6 / D9 未修**，仍为仅报告。
+> **修复轮次三（2026-09-16）**：修 **D6**（同一知识库第二次上传必定失败
+> —— `chunk_id` 只由「知识库 ID + 本次上传内的分块序号」构成，必然撞唯一键）。
+> 用例数不变（162），其中两条缺陷快照测试翻转为正向契约断言，并新增一条可追溯性断言。
+> 见第十一节。
+>
+> 剩余 **D3 / D4 / D5 / D9 未修**，仍为仅报告。
 
 ---
 
@@ -29,12 +34,15 @@
 ### 1.1 结果总览
 
 ```
-Tests run: 155, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 162, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
-测试规模从 70 个增长到 155 个（+85），覆盖了此前**完全没有测试**的四条主链路：
+测试规模从 70 个增长到 162 个（+92），覆盖了此前**完全没有测试**的四条主链路：
 对话落库、工具调用、多路召回注入、SSE 流式输出。
+（测试轮次结束时为 151 个；三轮修复中新增 11 个回归用例。）
+
+主代码最终覆盖率：**行 62.69% / 分支 57.09% / 指令 63.03% / 方法 71.83%**。
 
 ### 1.2 覆盖率前后对比
 
@@ -71,7 +79,7 @@ BUILD SUCCESS
 | 编号 | 严重度 | 标题 | 状态 |
 | --- | --- | --- | --- |
 | **D1** | 🔴 高 | 405 / 415 / 404 被全局兜底误报为 **500** | ✅ **已修复**（第九节） |
-| **D6** | 🔴 高 | 同一知识库第二次上传文档**必定失败** | 仅报告 |
+| **D6** | 🔴 高 | 同一知识库第二次上传文档**必定失败** | ✅ **已修复**（第十一节） |
 | **D8** | 🔴 高 | 4 个返回 JPA 实体的读端点全部 **500**（LazyInitialization） | ✅ **已修复**（第十节） |
 | **D7** | 🔴 高 | Redis 不可用时 `/actuator/health` 报 **503 DOWN**，服务无法就绪 | ✅ **已修复**（第十节） |
 | **D3** | 🔴 高 | 降级向量库的 score 语义与 Milvus 不一致，`min-score` 形同虚设 | 仅报告 |
@@ -82,8 +90,10 @@ BUILD SUCCESS
 | **D2** | 🟡 低 | 404 响应体泄漏 Spring 内部措辞 | ✅ **已修复**（第九节） |
 | **D11** | 🔴 高 | 用过工具的会话查上下文必 **500**（`Map.of` 不接受 null） | ✅ **已修复**（第十节） |
 
-> D1~D6 来自自动化测试，D7~D10 来自 `local` profile 下的真实启动冒烟测试（见第七节）。
-> 合计 **10 个缺陷：6 高 / 2 中 / 2 低**，其中 **5 个已修复**（D1 / D2 / D7 / D8 / D10），5 个仅报告。
+> D1~D6 来自自动化测试，D7~D10 来自 `local` profile 下的真实启动冒烟测试（见第七节），
+> D11 来自接入真实模型后的端到端验证（见第十节）。
+> 合计 **11 个缺陷：7 高 / 2 中 / 2 低**，其中 **7 个已修复**
+> （D1 / D2 / D6 / D7 / D8 / D10 / D11），4 个仅报告。
 
 **故障固化机制**：D1/D2/D3/D4/D5/D6 在测试轮次以「缺陷快照测试」（characterization test）固化，
 断言写的是**当前真实行为**。这正是本轮修复的抓手——D1/D2 修好后，
@@ -204,7 +214,7 @@ public ResponseEntity<ApiError> handleErrorResponse(ErrorResponseException e, Ht
 
 ---
 
-### D6 🔴 同一知识库第二次上传必定失败
+### D6 🔴 同一知识库第二次上传必定失败 ✅ 已修复
 
 **严重度：高** ｜ **证据：`BoundaryAndConcurrencyTest#secondUploadToSameKnowledgeBaseFails`、`#duplicateChunkIdRollsBackAtomicallyAndHidesTheCause`** ｜ **位置：`DocumentService:129/149`**
 
@@ -268,6 +278,22 @@ document.setChunkId(docId + "_chunk_" + i);
 但更推荐前者——chunk_id 本就该全局唯一，这样也便于溯源。
 同时把 `DocumentService:77` 的异常包装改为保留更具体的信息，
 或在 `DocumentController` 里对 `DataIntegrityViolationException` 单独给出可读提示。
+
+#### 修复（第十一节）
+
+按推荐方案实施：`saveDocumentsWithVectors` 里为**每次上传**生成一个 UUID 作为文档身份，
+`generateChunkId` 从 `kb_%d_chunk_%d`（知识库 ID + 本次分块序号）改为
+`doc_%s_chunk_%d`（本次上传的文档 ID + 本次分块序号）。
+
+`chunk_id` 由此**天然全局唯一**，`knowledge_base_id` 不再需要参与去重，
+唯一约束无需改动（`VARCHAR(100)` 也装得下：`doc_` + 32 位十六进制 + `_chunk_` + 序号 ≈ 46 字符）。
+
+> 关于「异常包装吞掉根因」：本轮**未改**。`DocumentController` 对上传失败返回
+> `500 + "文档上传失败：" + e.getMessage()`，`e.getMessage()` 是 `DocumentService` 的固定文案
+> `Failed to process document`，根因（唯一键冲突）只在服务端日志里。
+> 之所以先不动：D6 修好后这条路径已不再是「必然触发」，而改文案涉及
+> 「客户端该看到多少内部信息」的取舍——D2 已经确立了「不泄漏内部措辞」的原则，
+> 真要改应统一设计成「可读的领域错误 + 409」，而不是在这里单独放宽。留作待办。
 
 ---
 
@@ -783,8 +809,8 @@ mockMvc.perform(get(CONTEXT_PATH + "/tools")
 
 ## 六、工程建议（按优先级）
 
-1. ~~**立刻修 D1 与 D6**。~~ → **D1 已修**（连同 D2、D10，见第九节）。
-   **D6 仍待修**：它直接废掉了知识库的增量维护能力，改动量很小（约 3 行）。
+1. ~~**立刻修 D1 与 D6**。~~ → **均已修复**：D1 连同 D2、D10 见第九节，
+   D6 见第十一节（它直接废掉了知识库的增量维护能力，实际改动 5 行）。
 2. **部署前必须修 D7 与 D8**。这两个是「CI 全绿但上线即挂」的典型：
    D7 让 Pod 永远不 Ready（没有 Redis 时整个服务不可用），
    D8 让 4 个读端点在关掉 `open-in-view` 的环境里全部 500。
@@ -840,7 +866,7 @@ Started AiRagAgentApplication in 17.625 seconds
 | `GET /documents/search/detailed?query=` | ✅ 200 | 返回 `source: "keyword"`、`keywordRank: 1` |
 | `GET /documents/knowledge-bases/{id}/stats` | ✅ 200 | |
 | `POST /documents/upload`（首次） | ✅ 200 | `documentCount: 1` |
-| `POST /documents/upload`（同知识库第二次） | ❌ **500** | → **D6** 线上复现 |
+| `POST /documents/upload`（同知识库第二次） | ❌ **500** → ✅ **200** | → **D6** 线上复现，已修复（第十一节） |
 | `GET /tools` | ✅ 200 | 5 个工具（**但浏览器 Accept 下是 XML**，见 7.5 → **D10**） |
 | `POST /tools/{name}/execute`（calculator/math/datetime/search） | ✅ 200 | 结果正确，如 `计算结果：1+2*3 = 7.000000` |
 | `POST /tools/calculator/execute`（字段名写错 / 空 body） | ⚠️ 200 + `success:true` | → **D9** |
@@ -851,6 +877,7 @@ Started AiRagAgentApplication in 17.625 seconds
 
 **D1 / D2 / D6 在真实 HTTP 下逐条复现**，与自动化测试的断言完全一致——这说明
 「缺陷快照测试」的结论是对的，不是 mock 环境造成的假象。
+（三者现已全部修复：D1 / D2 见第九节，D6 见第十一节。）
 
 ### 7.3 关于向量路降级（一个正向结论）
 
@@ -951,6 +978,7 @@ mvn test -Dtest='ErrorHandlingContractTest,BoundaryAndConcurrencyTest'
 修复范围限定在**「HTTP 契约」这一层**——即「同一个请求，客户端拿到的状态码与格式是否正确」。
 这三条是唯一在真实浏览器访问时**必然**被撞到的缺陷，且改动小、风险低、可回滚。
 其余 7 个（D3~D9）涉及存储语义、并发与配置矩阵，需要单独评估，本轮未动。
+（后续轮次已修掉其中的 D7 / D8，见第十节；D6，见第十一节。）
 
 ### 9.1 改动清单
 
@@ -1160,6 +1188,97 @@ INFO  RagService - Multi-recall fused: vector=0, keyword=1, returned=1, topSourc
 ### 10.9 仍未修
 
 **D3**（降级向量库 score 口径）、**D4**（并发重复会话）、**D5**（并发 token 记账）、
-**D6**（同一知识库二次上传必失败）、**D9**（工具端点静默 `success: true`）。
-其中 **D6 改动最小（约 3 行）且影响面明确**，是下一个最值得修的目标。
+**D9**（工具端点静默 `success: true`）。~~D6~~ 已在第十一节修复。
+
+---
+
+## 十一、修复轮次三：D6（知识库增量维护）
+
+### 11.1 根因回顾
+
+`chunk_id` 由「知识库 ID + **本次上传内**的分块序号」构成：
+
+```java
+document.setChunkId(generateChunkId(knowledgeBase.getId(), i));   // DocumentService:129
+// → "kb_5_chunk_0" / "kb_5_chunk_1" / ...
+```
+
+第二次往同一知识库上传时 `i` 从 0 重新开始，必然重复插入 `kb_5_chunk_0`，
+撞上 `UNIQUE (knowledge_base_id, chunk_id)`，`@Transactional` 让整个上传回滚。
+**一个知识库名字只能用一次。**
+
+### 11.2 修法
+
+给每次上传生成一个文档身份，`chunk_id` 从「知识库维度」改为「上传批次维度」：
+
+```java
+// saveDocumentsWithVectors 开头
+String documentId = UUID.randomUUID().toString().replace("-", "");
+...
+document.setChunkId(generateChunkId(documentId, i));
+
+private String generateChunkId(String documentId, int chunkIndex) {
+    return String.format("doc_%s_chunk_%d", documentId, chunkIndex);
+}
+```
+
+**共 5 行**（含 import 无需新增——`UUID` 本就已引入）。
+
+选「加 UUID 前缀」而不是「把 `created_at` 加进唯一约束」的理由：
+`chunk_id` 本就该全局唯一，改前缀后同一知识库可反复追加、多文件入库，
+且每个分块能直接追溯到它来自哪一次上传（`doc_<uuid>_chunk_<i>`）。
+唯一约束与列宽（`VARCHAR(100)`）都无需改动。
+
+### 11.3 验证
+
+**两条缺陷快照测试翻转为正向契约断言**，并新增一条可追溯性断言：
+
+| 用例 | 断言 |
+| --- | --- |
+| `secondUploadToSameKnowledgeBaseSucceeds` | 第二次上传 200、`documentCount: 1`、`BETA-2000` 真的进库，且两批内容**都能被检索到** |
+| `chunkIdIsUniqueAcrossUploadsAndTraceable` | `chunk_id` 跨两次上传**不重复**、都形如 `doc_..._chunk_0`，且两次上传的前缀（文档身份）**互不相同** |
+
+**先验证用例能抓到缺陷**：把 `DocumentService.java` 暂时 `git stash` 回旧版本后单独运行这两条，
+结果如预期失败 ——
+
+```
+secondUploadToSameKnowledgeBaseSucceeds  Status expected:<200> but was:<500>
+chunkIdIsUniqueAcrossUploadsAndTraceable  indexDocument:408 ? Runtime  Failed to process document
+Tests run: 2, Failures: 1, Errors: 1
+```
+
+恢复修复后再跑，162 个用例全绿。**这两条不是「跟着实现写」的测试，是真的能红。**
+
+顺带清掉了 `resultCountIsBoundedByTopK` 里为绕开 D6 而把两条内容拆进两个知识库的权宜写法
+——现在两条内容写进**同一个**知识库，才真正测到「同一知识库下 topK 是否生效」。
+
+**真实 HTTP 复验**（重启 `local` profile 后，对同一个知识库连传三次）：
+
+```
+POST /api/documents/upload  → 200  {"success":true,"documentCount":1,"knowledgeBaseId":1}
+POST /api/documents/upload  → 200  {"success":true,"documentCount":1,"knowledgeBaseId":1}
+POST /api/documents/upload  → 200  {"success":true,"documentCount":1,"knowledgeBaseId":1}
+```
+
+三条记录的 `chunkId` 互不相同，都形如 `doc_<uuid>_chunk_0`：
+
+```
+doc_1e44a04c980f4bf7aa9a4788e18fdbf4_chunk_0
+doc_745101532f2e45df9be1e6266b00fc8f_chunk_0
+doc_b3bc52f1662e4a6298c42529b058eafb_chunk_0
+```
+
+`GET /documents/search/detailed` 的召回也是精确的（第 1、3 条同为第一份文件的内容）：
+
+| 查询 | 命中 |
+| --- | --- |
+| `ALPHA-1000` | 2 条（`keywordRank` 1、2），均来自第一份文件 |
+| `BETA-2000` | 1 条，来自第二份文件 |
+
+### 11.4 未做
+
+`DocumentController` 上传失败的响应仍是 `500 + "文档上传失败：Failed to process document"`，
+根因只在服务端日志里。**本轮有意不动**——D6 修好后这条路径已不再必然触发，
+而改文案是「客户端该看到多少内部信息」的取舍，应统一设计成「可读的领域错误 + 409」，
+而不是在这里单独放宽（D2 已确立「不泄漏内部措辞」的原则）。
 
