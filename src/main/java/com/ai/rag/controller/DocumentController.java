@@ -1,9 +1,9 @@
 package com.ai.rag.controller;
 
+import com.ai.rag.model.dto.DocumentSummary;
 import com.ai.rag.model.dto.DocumentUploadRequest;
+import com.ai.rag.model.dto.KnowledgeBaseSummary;
 import com.ai.rag.model.dto.RetrievalHit;
-import com.ai.rag.model.entity.Document;
-import com.ai.rag.model.entity.KnowledgeBase;
 import com.ai.rag.repository.DocumentRepository;
 import com.ai.rag.repository.KnowledgeBaseRepository;
 import com.ai.rag.service.DocumentService;
@@ -66,10 +66,14 @@ public class DocumentController {
 
     /**
      * 获取所有知识库
+     *
+     * <p>返回 {@link KnowledgeBaseSummary} 而非实体 —— 见 DTO 类注释（缺陷 D8）。
      */
     @GetMapping("/knowledge-bases")
-    public ResponseEntity<List<KnowledgeBase>> getAllKnowledgeBases() {
-        List<KnowledgeBase> knowledgeBases = knowledgeBaseRepository.findAll();
+    public ResponseEntity<List<KnowledgeBaseSummary>> getAllKnowledgeBases() {
+        List<KnowledgeBaseSummary> knowledgeBases = knowledgeBaseRepository.findAll().stream()
+                .map(KnowledgeBaseSummary::from)
+                .toList();
         return ResponseEntity.ok(knowledgeBases);
     }
 
@@ -77,8 +81,9 @@ public class DocumentController {
      * 获取知识库详情
      */
     @GetMapping("/knowledge-bases/{id}")
-    public ResponseEntity<KnowledgeBase> getKnowledgeBase(@PathVariable Long id) {
+    public ResponseEntity<KnowledgeBaseSummary> getKnowledgeBase(@PathVariable Long id) {
         return knowledgeBaseRepository.findById(id)
+            .map(KnowledgeBaseSummary::from)
             .map(ResponseEntity::ok)
             .orElse(ResponseEntity.notFound().build());
     }
@@ -119,22 +124,31 @@ public class DocumentController {
 
     /**
      * 获取知识库文档列表
+     *
+     * <p>返回 {@link DocumentSummary} 而非实体 —— 见 DTO 类注释（缺陷 D8）。
      */
     @GetMapping("/knowledge-bases/{id}/documents")
-    public ResponseEntity<List<Document>> getKnowledgeBaseDocuments(@PathVariable Long id) {
-        List<Document> documents = documentRepository.findByKnowledgeBaseId(id);
+    public ResponseEntity<List<DocumentSummary>> getKnowledgeBaseDocuments(@PathVariable Long id) {
+        List<DocumentSummary> documents = documentRepository.findByKnowledgeBaseId(id).stream()
+                .map(DocumentSummary::from)
+                .toList();
         return ResponseEntity.ok(documents);
     }
 
     /**
      * 搜索知识库
+     *
+     * <p>返回 {@link DocumentSummary} 而非实体 —— 见 DTO 类注释（缺陷 D8）。
+     * 需要看分数与排名请用 {@code /documents/search/detailed}。
      */
     @GetMapping("/search")
-    public ResponseEntity<List<Document>> searchDocuments(
+    public ResponseEntity<List<DocumentSummary>> searchDocuments(
             @RequestParam String query,
             @RequestParam(required = false) Long knowledgeBaseId,
             @RequestParam(defaultValue = "5") int topK) {
-        List<Document> results = ragService.searchRelevantDocuments(query, knowledgeBaseId, topK);
+        List<DocumentSummary> results = ragService.searchRelevantDocuments(query, knowledgeBaseId, topK).stream()
+                .map(DocumentSummary::from)
+                .toList();
         return ResponseEntity.ok(results);
     }
 

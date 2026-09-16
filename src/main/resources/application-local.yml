@@ -55,6 +55,20 @@ security:
 rate-limit:
   enabled: false
 
+# 健康检查（修复缺陷 D7）
+#
+# Spring Boot 默认把 RedisHealthIndicator 计入整体健康，而本机不跑 Redis，
+# 于是 /actuator/health 恒为 503 DOWN —— 在 K8s 里这意味着 Pod 永远不 Ready，
+# 但要命的不是「Redis 挂了」而是「服务其实能跑，只是被可选的依赖拖垮了」。
+#
+# 本项目里 Redis 是**可选**依赖：连接是懒建立的，缓存不可用时业务照常走库。
+# 因此本地关掉这个指示器。生产环境若把 Redis 当必需组件，应保持开启，
+# 并改用 health group 区分 liveness / readiness，而不是让 /health 一票否决。
+management:
+  health:
+    redis:
+      enabled: false
+
 # 日志
 logging:
   level:

@@ -6,6 +6,7 @@ import com.ai.rag.service.AgentService;
 import com.ai.rag.service.StreamingChatService;
 import com.ai.rag.service.TokenService;
 import com.ai.rag.util.TokenCounter;
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageType;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
@@ -20,6 +21,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -144,8 +146,8 @@ public class ChatController {
      */
     @GetMapping("/context/{sessionId}")
     public ResponseEntity<Map<String, Object>> getContext(@PathVariable String sessionId) {
-        List<Map<String, String>> history = chatMemoryStore.getMessages(sessionId).stream()
-            .map(m -> Map.of("role", m.type().name(), "content", m.text()))
+        List<Map<String, Object>> history = chatMemoryStore.getMessages(sessionId).stream()
+            .map(ChatController::toHistoryEntry)
             .toList();
 
         Map<String, Object> response = new HashMap<>();
@@ -154,6 +156,36 @@ public class ChatController {
         response.put("messages", history);
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 把一条 {@link ChatMessage} 转成上下文响应里的一项
+     *
+     * <p><b>为什么不能直接用 {@code Map.of(...)}（缺陷 D11）：</b>
+     * {@code Map.of} 的键值都**不允许为 null**，而 {@code AiMessage.text()}
+     * 在「只发起工具调用、没有文本内容」时正好返回 null。
+     * 于是只要一个会话触发过一次工具调用，再查它的上下文就会 NPE → 500。
+     *
+     * <p>这里做两件事：把 {@code content} 的 null 兜成空串，
+     * 并把工具调用单独透出到 {@code toolCalls} 字段 —— 否则那段「模型决定调什么工具」
+     * 的过程在上下文里会变成一条内容为空的、看不出发生过什么的记录，排错时很误导。
+     */
+    private static Map<String, Object> toHistoryEntry(ChatMessage message) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("role", message.type().name());
+        entry.put("content", message.text() == null ? "" : message.text());
+
+        if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+            entry.put("toolCalls", ai.toolExecutionRequests().stream()
+                    .map(req -> {
+                        Map<String, Object> call = new LinkedHashMap<>();
+                        call.put("name", req.name());
+                        call.put("arguments", req.arguments());
+                        return call;
+                    })
+                    .toList());
+        }
+        return entry;
     }
 
     /**
@@ -179,7 +211,9 @@ public class ChatController {
         int inputTokens = 0;
         int outputTokens = 0;
         for (ChatMessage msg : chatMemoryStore.getMessages(sessionId)) {
-            int tokens = TokenCounter.estimateTokens(msg.text());
+            // text() 可能为 null（AiMessage 只发起工具调用时，见 getContext 的注释）；
+            // 这类消息没有文本可估，按 0 计。
+            int tokens = msg.text() == null ? 0 : TokenCounter.estimateTokens(msg.text());
             if (msg.type() == ChatMessageType.USER) {
                 inputTokens += tokens;
             } else {

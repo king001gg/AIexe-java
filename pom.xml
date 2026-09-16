@@ -69,6 +69,26 @@
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-milvus</artifactId>
             <version>${langchain4j.version}</version>
+            <exclusions>
+                <!--
+                  排除 Jackson XML 序列化器（缺陷 D10）。
+
+                  milvus-sdk-java 为对接 Azure Blob 批量导入拖进了
+                  azure-storage-blob，后者又传递依赖 jackson-dataformat-xml。
+                  Spring Boot 一旦在 classpath 上探测到它，就会自动注册
+                  MappingJackson2XmlHttpMessageConverter，而它支持的
+                  `application/*+xml` 通配恰好匹配浏览器 Accept 里的
+                  `application/xhtml+xml` —— 于是**所有响应（含成功响应）**
+                  在浏览器访问时都被序列化成 XML，而不是约定的 JSON。
+
+                  本项目全程只用 JSON，该转换器与 Azure Blob 能力均未使用。
+                  显式排除后转换器不会被注册，契约恢复为恒定 JSON。
+                -->
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.dataformat</groupId>
+                    <artifactId>jackson-dataformat-xml</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Document Processing -->
@@ -162,6 +182,27 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <!-- 测试覆盖率：mvn test 后生成 target/site/jacoco/index.html -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
