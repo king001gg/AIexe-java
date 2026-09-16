@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -25,8 +26,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -44,9 +47,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       但线上只要有一个用户快速连点就会触发。</li>
  * </ol>
  *
- * <p>并发用例的断言写的是**当前实测行为**，其中两条（D4/D5）固化的是缺陷而非期望值，
- * 断言文案里已标明「正确行为应是什么」。修复后这些用例会失败——这正是它们存在的意义：
- * 把缺陷钉在测试里，修复时不可能悄悄溜过去。
+ * <p>并发这一节最初有两条用例（D4/D5）固化的是**缺陷行为**而非期望值，它们的作用是在修复
+ * 之前把缺陷钉进测试里。D4/D5 修复后这两条已翻转为回归用例：断言并发创建会话幂等、
+ * 并发记账不丢更新（含 `total_tokens` 的精确累计），并各自补了一个独立维度的断言
+ * （异常计数器、累计值），以免出现「实现把异常吞掉、用例照样绿」的假守卫。
  */
 @Slf4j
 class BoundaryAndConcurrencyTest extends IntegrationTestSupport {
@@ -277,67 +281,102 @@ class BoundaryAndConcurrencyTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("缺陷 D4：并发首次访问同一 sessionId 会创建出重复会话（先查后插 + session_id 无唯一约束）")
+    @DisplayName("D4 回归：并发首次访问同一 sessionId 必须幂等——只出一条会话，且没人被抛异常")
     void concurrentConversationCreationRaces() throws Exception {
-        int duplicated = 0;
-
-        for (int round = 0; round < RACE_ROUNDS && duplicated <= 1; round++) {
+        for (int round = 0; round < RACE_ROUNDS; round++) {
             String sessionId = "session-race-d4-" + round;
-            runConcurrently(RACE_THREADS, true,
-                    i -> conversationService.getOrCreateConversation(sessionId, "tester", "gpt-4"));
-            duplicated = countWhere("conversations", "session_id = '" + sessionId + "'");
-        }
+            AtomicInteger failures = new AtomicInteger();
+            AtomicReference<Throwable> firstFailure = new AtomicReference<>();
 
-        // 正确行为：并发下也应幂等，恒为 1（需要 session_id 唯一约束 + 撞唯一键后重查）。
-        // 当前行为：findBySessionId 全部查不到 → 各自 insert → 产生多条。
-        assertThat(duplicated)
-                .as("当前行为快照（缺陷 D4）：并发首次访问产出了 %d 个会话；正确实现应恒为 1", duplicated)
-                .isGreaterThan(1);
+            runConcurrently(RACE_THREADS, true, i -> {
+                try {
+                    conversationService.getOrCreateConversation(sessionId, "tester", "gpt-4");
+                } catch (RuntimeException e) {
+                    failures.incrementAndGet();
+                    firstFailure.compareAndSet(null, e);
+                }
+            });
+
+            // 把首个异常带进失败信息：不然「期望 0 实际 1」这种红没有任何线索。
+            // 缺陷在时会看到 IncorrectResultSizeDataAccessException——重复行一旦存在，
+            // 单值查询就炸，这正是 D4「永久打坏」的那一层。
+            assertThat(failures.get())
+                    .as("第 %d 轮：撞唯一键的线程必须走「重查既有会话」分支，不能把异常抛给调用方（首个异常：%s）",
+                            round, firstFailure.get())
+                    .isZero();
+
+            // 这个计数器不是装饰：runConcurrently 会把 Throwable 吞掉只打日志，
+            // 没有它的话「11 个线程全炸、1 个成功」也能让下面这条 countWhere 通过——
+            // 那就是一个假的守卫，守卫的恰恰是 D4 本身。
+            assertThat(countWhere("conversations", "session_id = '" + sessionId + "'"))
+                    .as("第 %d 轮：并发创建必须幂等，只允许一条会话", round)
+                    .isEqualTo(1);
+        }
     }
 
     @Test
-    @DisplayName("缺陷 D4 的后果：一旦出现重复会话，该 sessionId 之后所有请求都永久 500")
-    void duplicateConversationsBreakTheSessionPermanently() throws Exception {
-        // 直接构造出竞态的结果，不依赖线程调度，断言稳定可复现
-        for (int i = 0; i < 2; i++) {
-            jdbcTemplate.update("INSERT INTO conversations (session_id, title, user_name, model) "
-                    + "VALUES ('session-duplicated', '新会话', 'tester', 'gpt-4')");
-        }
+    @DisplayName("D4 修复后：唯一约束成为最后一道防线——绕过业务层也插不进重复会话，且会话照常可用")
+    void duplicateConversationsAreRejectedByUniqueConstraint() throws Exception {
+        conversationService.getOrCreateConversation("session-unique", "tester", "gpt-4");
 
+        // 旧行为：这里能插进去，随后 findBySessionId 抛 IncorrectResultSizeDataAccessException，
+        // 该 sessionId 之后所有请求永久 500（原用例断言的就是这个）。
+        // 新行为：数据库层直接拒绝，重复行从源头不可能出现。
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO conversations (session_id, title, user_name, model) "
+                        + "VALUES ('session-unique', '新会话', 'tester', 'gpt-4')"))
+                .as("绕过业务层直接插重复行也必须被数据库拒绝")
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThat(countWhere("conversations", "session_id = 'session-unique'")).isEqualTo(1);
+
+        // 约束没有把正常路径一起挡住：既有会话照常可用
+        chatModel.reply("(stub) 你好，我是助手", new TokenUsage(2, 2));
         mockMvc.perform(apiPost("/chat/message")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"sessionId\":\"session-duplicated\",\"message\":\"你好\"}"))
-                .andExpect(status().isInternalServerError());
-
-        assertThat(chatModel.invocationCount())
-                .as("会话查询就已经失败，不应白花一次模型调用")
-                .isZero();
+                        .content("{\"sessionId\":\"session-unique\",\"message\":\"你好\"}"))
+                .andExpect(status().isOk());
+        assertThat(countWhere("messages", "conversation_id = "
+                + "(SELECT id FROM conversations WHERE session_id = 'session-unique')"))
+                .as("一轮问答的两条消息（用户 + 助手）都应挂在唯一的那条会话上——"
+                        + "既证明会话仍可用，也证明约束没有把写入路径连带挡掉")
+                .isEqualTo(2);
     }
 
     @Test
-    @DisplayName("缺陷 D5：同一会话同日并发记账会撞唯一约束 uk_session_date")
+    @DisplayName("D5 回归：同一会话同日并发记账不丢更新、不撞唯一约束，累计用量精确")
     void concurrentTokenUsageRecordingRaces() throws Exception {
-        AtomicInteger failures = new AtomicInteger();
-        int rows = 0;
-
-        for (int round = 0; round < RACE_ROUNDS && failures.get() == 0; round++) {
+        for (int round = 0; round < RACE_ROUNDS; round++) {
             String sessionId = "session-token-race-" + round;
+            AtomicInteger failures = new AtomicInteger();
+            AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+
             runConcurrently(RACE_THREADS, true, i -> {
                 try {
                     tokenService.recordTokenUsage(sessionId, 1L, 10, 5, "gpt-4");
                 } catch (RuntimeException e) {
                     failures.incrementAndGet();
+                    firstFailure.compareAndSet(null, e);
                 }
             });
-            rows = countWhere("token_usage", "session_id = '" + sessionId + "'");
-        }
 
-        // 正确行为：并发累加不应失败（撞唯一键后重查再累加，或改为数据库端原子 upsert）。
-        // 当前行为：先查后插，多个线程同时查不到 → 同时 insert → 唯一键冲突。
-        assertThat(failures.get())
-                .as("当前行为快照（缺陷 D5）：%d 次并发记账抛异常；该会话最终只有 %d 行、累计 token 不足",
-                        failures.get(), rows)
-                .isPositive();
+            assertThat(failures.get())
+                    .as("第 %d 轮：并发记账不应有失败——当天还没有行时多个线程会同时插入，"
+                            + "撞唯一键的那几次必须被吞掉并改成累加，而不是把这次用量整笔丢掉（首个异常：%s）",
+                            round, firstFailure.get())
+                    .isZero();
+
+            assertThat(countWhere("token_usage", "session_id = '" + sessionId + "'"))
+                    .as("第 %d 轮：同一会话同日应恰好一行（唯一的累加目标）", round)
+                    .isEqualTo(1);
+
+            // 这条才是「不丢更新」的真正证明：只断言「没抛异常」的话，
+            // 一个把并发写入静默丢弃的实现同样能通过。
+            assertThat(sumTokens(sessionId))
+                    .as("第 %d 轮：%d 次并发各记 10+5=15 token，累计必须是 %d",
+                            round, RACE_THREADS, RACE_THREADS * 15)
+                    .isEqualTo(RACE_THREADS * 15);
+        }
     }
 
     @Test
@@ -446,5 +485,13 @@ class BoundaryAndConcurrencyTest extends IntegrationTestSupport {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM " + table + " WHERE " + where, Integer.class);
         return count == null ? 0 : count;
+    }
+
+    /** 某会话的累计 token（用于验证并发累加没有丢更新） */
+    private int sumTokens(String sessionId) {
+        Integer sum = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage WHERE session_id = ?",
+                Integer.class, sessionId);
+        return sum == null ? 0 : sum;
     }
 }
