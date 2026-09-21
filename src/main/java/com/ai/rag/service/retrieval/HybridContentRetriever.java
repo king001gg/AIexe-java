@@ -20,8 +20,9 @@ import java.util.List;
  * 在 AiServices 对话时自动注入 prompt，替代原先只走向量单路召回的
  * {@code EmbeddingStoreContentRetriever}。
  *
- * <p>注入的 {@link TextSegment} 携带 {@code documentId}/{@code chunkId}/{@code rrfScore}/{@code source}
- * 元数据，便于后续做引用溯源（Stage 4 评测 / 前端展示引用编号）。
+ * <p>注入的 {@link TextSegment} 携带
+ * {@code documentId}/{@code chunkId}/{@code rrfScore}/{@code source}/{@code vectorRank}/{@code keywordRank}
+ * 元数据，便于后续做引用溯源（Stage 4 评测 / 前端展示引用编号与分路排名）。
  *
  * <p>检索失败时返回空列表（本轮不做知识注入），不影响对话主流程。
  */
@@ -64,7 +65,12 @@ public class HybridContentRetriever implements ContentRetriever {
                 .put("documentId", doc.getId() == null ? "" : String.valueOf(doc.getId()))
                 .put("chunkId", doc.getChunkId() == null ? "" : doc.getChunkId())
                 .put("rrfScore", String.format("%.6f", hit.score()))
-                .put("source", hit.source());
+                .put("source", hit.source())
+                // 分路排名一并带出去。此前只写 rrfScore/source，前端拿不到「这一条是向量第几、
+                // 关键词第几」，聊天里的引用面板就画不出泳道 —— 而向量路静默失效恰恰要靠它才看得出来。
+                // 0 表示该路未召回，是有意义的取值，不要当成缺失。（Metadata 只存字符串，读侧再转回数字）
+                .put("vectorRank", String.valueOf(hit.vectorRank()))
+                .put("keywordRank", String.valueOf(hit.keywordRank()));
 
         return TextSegment.from(doc.getContent(), metadata);
     }

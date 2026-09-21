@@ -208,10 +208,27 @@ public class StreamingChatService {
             return Map.<String, Object>of(
                     "chunkId", metadata.getString("chunkId") == null ? "" : metadata.getString("chunkId"),
                     "documentId", metadata.getString("documentId") == null ? "" : metadata.getString("documentId"),
+                    // score 保持字符串：前端类型就是这么约定的，rrfScore 已格式化成 %.6f
                     "score", metadata.getString("rrfScore") == null ? "" : metadata.getString("rrfScore"),
                     "source", metadata.getString("source") == null ? "" : metadata.getString("source"),
+                    // 分路排名发数字而不是字符串：前端 SourceItem 的这两个字段是 number，
+                    // 且 0 有语义（该路未召回），字符串比较会把它和 "0" 混淆
+                    "vectorRank", rankOf(metadata.getString("vectorRank")),
+                    "keywordRank", rankOf(metadata.getString("keywordRank")),
                     "preview", abbreviate(segment.text()));
         }).toList();
+    }
+
+    /**
+     * 元数据里的排名是字符串（Metadata 只能存字符串），转回数字。
+     * 缺失或非法一律按 0 —— 语义就是「该路未召回」，与前端约定一致。
+     */
+    private int rankOf(String raw) {
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     /**
