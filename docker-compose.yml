@@ -8,14 +8,31 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # 没有 application-prod.yml。Spring 激活一个不存在的 profile 不报错，只是
+      # 回落到 application.yml —— 所以这个值本身不是病根，真正的病根是下面几条
+      # 环境变量此前没有任何人读（application.yml 硬编码了 localhost），现已修正。
       - SPRING_PROFILES_ACTIVE=prod
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - MILVUS_HOST=milvus
-      - MILVUS_PORT=19530
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - DB_HOST=mysql
       - DB_PORT=3306
+      # root 密码与 mysql 服务的 MYSQL_ROOT_PASSWORD 绑到同一个变量：否则在 .env
+      # 里改了密码只有库那边生效，应用这边仍拿默认值去连，症状是 Flyway 认证失败
+      - DB_USERNAME=${DB_USERNAME:-root}
+      - DB_PASSWORD=${MYSQL_ROOT_PASSWORD:-password}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      # Milvus 只自带 default 库，ai_rag_db 在仓库里没有任何地方创建（Milvus 不是
+      # MySQL，不会因为连接串里写了库名就自动建库）。这里显式指向一定存在的
+      # default；若确实想要独立的 ai_rag_db，得另外加一次性初始化步骤去建它。
+      - MILVUS_DATABASE=${MILVUS_DATABASE:-default}
+      # 空卷首次启动必须设：langchain4j 建 HNSW 索引时不传任何 index 参数，
+      # Milvus 2.3.9 会用自己的默认值 0 然后以 `efConstruction out of range`
+      # 拒绝；该异常在 MilvusConfig 里被吞成一条 WARN，应用静默退回
+      # InMemoryEmbeddingStore，健康检查照样 UP。collection 一旦建好就不再建索引，
+      # 所以后续启动不需要它，留着无害。
+      - MILVUS_COLLECTION_INDEXTYPE=AUTOINDEX
     depends_on:
       - mysql
       - redis

@@ -8,17 +8,27 @@ spring:
     name: ai-rag-agent
 
   # 数据库配置
+  #
+  # 主机/端口/账号走环境变量。此前这里是硬编码的 localhost，而 docker-compose
+  # 传进来的 DB_HOST/DB_PORT 没有任何地方读取 —— 在容器里 localhost 指向应用自己，
+  # 于是 Flyway 连不上 MySQL，应用直接起不来。同一个文件里 milvus.host 用的是
+  # ${MILVUS_HOST:localhost}，这里属于漏改。
+  # 默认值保持与改动前一致，所以不设这些变量的场景（含 local profile）行为不变。
   datasource:
-    url: jdbc:mysql://localhost:3306/ai_rag_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
-    username: root
-    password: password
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/ai_rag_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:password}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   # Redis配置
+  #
+  # 同上：compose 传 REDIS_HOST/REDIS_PORT，此前也是硬编码 localhost 没人接。
+  # Redis 在本项目里是可选依赖（懒连接），所以连不上不会拦住启动 —— 正因如此
+  # 这个错误更隐蔽：应用起来了，但缓存一路静默失效。
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
       password:
       database: 0
       timeout: 10000ms
