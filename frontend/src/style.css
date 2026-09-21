@@ -1,0 +1,199 @@
+@import 'tailwindcss';
+
+/*
+ * 设计令牌。Tailwind v4 的 @theme 会据此生成对应的 bg / text / border 工具类。
+ * 深色优先：这是个开发者调试工具，长时间盯屏幕。
+ * 注意：注释里不要写星号加斜杠，会提前闭合注释块。
+ */
+@theme {
+  --color-bg: #0b0d12;
+  --color-surface: #12151d;
+  --color-surface2: #181c26;
+  --color-surface3: #1f2430;
+  --color-line: #262c3a;
+  --color-line-soft: #1d222d;
+
+  --color-fg: #e7e9ee;
+  --color-muted: #98a1b3;
+  --color-faint: #6b7486;
+
+  --color-accent: #5b8def;
+  --color-accent-soft: #1c2740;
+
+  --color-ok: #3ecf8e;
+  --color-warn: #e8b339;
+  --color-danger: #f0616d;
+  --color-info: #57b8d8;
+  --color-vector: #8b7cf6; /* 向量路 */
+  --color-keyword: #e0993e; /* 关键词路 */
+  --color-hybrid: #3ecf8e; /* 双路命中 */
+
+  --font-sans: 'Inter', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, 'Courier New', monospace;
+
+  --radius-lg: 12px;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 细滚动条：默认的太抢眼 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface3);
+  background-clip: content-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* ───────── Markdown 正文 ─────────
+ * 不用 @tailwindcss/typography：它自带一整套排版假设，
+ * 在这个「回答里代码/表格/列表混排」的场景下要覆盖的地方比手写还多。 */
+.md {
+  word-break: break-word;
+}
+.md > *:first-child {
+  margin-top: 0;
+}
+.md > *:last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0.55em 0;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 1.1em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.md h1 {
+  font-size: 1.35em;
+}
+.md h2 {
+  font-size: 1.2em;
+}
+.md h3 {
+  font-size: 1.08em;
+}
+.md ul,
+.md ol {
+  margin: 0.55em 0;
+  padding-left: 1.5em;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin: 0.22em 0;
+}
+.md a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md blockquote {
+  margin: 0.7em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--color-line);
+  color: var(--color-muted);
+}
+.md code {
+  background: var(--color-surface3);
+  padding: 0.12em 0.4em;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+.md pre {
+  margin: 0.7em 0;
+  padding: 0.85em 1em;
+  background: #0d1017;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.86em;
+  line-height: 1.55;
+}
+.md table {
+  margin: 0.7em 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.93em;
+}
+.md th,
+.md td {
+  border: 1px solid var(--color-line);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.md th {
+  background: var(--color-surface2);
+  font-weight: 600;
+}
+.md hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--color-line);
+}
+/* 流式输出时最后一段还在长，光标做在块级末尾更自然 —— 见 ChatMessage.vue */
+.md.streaming > *:last-child::after {
+  content: '▍';
+  color: var(--color-accent);
+  animation: caret 1.05s steps(2, start) infinite;
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* 页面切换淡入 */
+.fade-enter-active {
+  transition: opacity 0.16s ease;
+}
+.fade-enter-from {
+  opacity: 0;
+}
